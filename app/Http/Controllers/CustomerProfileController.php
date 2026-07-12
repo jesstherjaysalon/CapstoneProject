@@ -123,10 +123,7 @@ class CustomerProfileController extends Controller
     public function storeFaceData(RegisterFaceRequest $request, User $user, FaceRecognitionService $faceRecognitionService)
     {
         if (!$request->hasValidSignature()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid or expired link.',
-            ], 403);
+            abort(403, 'Invalid or expired signature.');
         }
 
         $profile = $user->profile;
@@ -182,8 +179,8 @@ class CustomerProfileController extends Controller
         Storage::disk('local')->delete($tempPath);
 
         $user->update(['status' => User::STATUS_ACTIVE]);
-        Auth::login($user);
+        Auth::logout();
 
-        return redirect()->route('dashboard')->with('success', 'Face registration completed successfully. Your account is now fully activated.');
+        return redirect()->route('login')->with('success', 'Please go back to the app and try logging in your created account');
     }
 }

@@ -31,6 +31,8 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
     const [paymentBooking, setPaymentBooking] = useState(null);
     const [paymentAmount, setPaymentAmount] = useState('');
     const [remarks, setRemarks] = useState('');
+    const [assignmentSuccess, setAssignmentSuccess] = useState(false);
+    const [assignedCount, setAssignedCount] = useState(0);
 
     const filteredBookings = useMemo(() => {
         const query = search.trim().toLowerCase();
@@ -232,19 +234,49 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
 
     const handleStaffAssign = (event, serviceId) => {
         event.preventDefault();
+        const staffId = event.target.staff_id.value;
+
         router.put(route('admin.appointments.service.assign', serviceId), {
-            staff_id: event.target.staff_id.value,
+            staff_id: staffId,
+        }, {
+            onSuccess: () => {
+                setAssignmentSuccess(true);
+                setAssignedCount(prev => prev + 1);
+
+                // Check if all services are assigned
+                const totalServices = selectedBooking.services.length;
+                const unassignedServices = selectedBooking.services.filter(s => !s.job_order || !s.job_order.staff_id).length;
+
+                // If this was the last unassigned service OR if there was only 1 service total, close modal
+                if (unassignedServices === 1 || totalServices === 1) {
+                    setTimeout(() => {
+                        closeModal();
+                        setAssignmentSuccess(false);
+                        setAssignedCount(0);
+                        router.reload();
+                    }, 1000);
+                } else {
+                    // Hide success message after 2 seconds but keep modal open
+                    setTimeout(() => {
+                        setAssignmentSuccess(false);
+                    }, 2000);
+                }
+            },
         });
     };
 
     const openModal = (booking) => {
         setSelectedBooking(booking);
         setIsModalOpen(true);
+        setAssignmentSuccess(false);
+        setAssignedCount(0);
     };
 
     const closeModal = () => {
         setIsModalOpen(false);
         setSelectedBooking(null);
+        setAssignmentSuccess(false);
+        setAssignedCount(0);
     };
 
     const openPaymentModal = (booking) => {
@@ -291,7 +323,25 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
     };
 
     return (
-        <AuthenticatedLayout user={auth.user} header={<h2 className="font-semibold text-xl text-gray-800 leading-tight">Appointments</h2>}>
+        <>
+            <style>{`
+                .custom-scrollbar::-webkit-scrollbar {
+                    height: 8px;
+                    width: 8px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                    background: #f1f5f9;
+                    border-radius: 4px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                    background: #cbd5e1;
+                    border-radius: 4px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                    background: #94a3b8;
+                }
+            `}</style>
+            <AuthenticatedLayout user={auth.user} header={<h2 className="font-semibold text-xl text-gray-800 leading-tight">Appointments</h2>}>
             <Head title="Appointments" />
 
             <div className="space-y-6 py-6 px-4">
@@ -408,13 +458,13 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                         </div>
                     ) : (
                         <>
-                            <div className="overflow-x-auto">
-                                <table className="w-full">
+                            <div className="overflow-x-auto custom-scrollbar">
+                                <table className="w-full min-w-[1200px]">
                                     <thead>
                                         {table.getHeaderGroups().map((headerGroup) => (
                                             <tr key={headerGroup.id} className="border-b border-slate-200 bg-slate-50">
                                                 {headerGroup.headers.map((header) => (
-                                                    <th key={header.id} className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                                                    <th key={header.id} className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wide whitespace-nowrap">
                                                         {header.isPlaceholder
                                                             ? null
                                                             : flexRender(
@@ -430,7 +480,7 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                         {table.getRowModel().rows.map((row) => (
                                             <tr key={row.id} className="hover:bg-slate-50 transition">
                                                 {row.getVisibleCells().map((cell) => (
-                                                    <td key={cell.id} className="px-6 py-4 text-sm text-slate-700">
+                                                    <td key={cell.id} className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">
                                                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                                     </td>
                                                 ))}
@@ -439,9 +489,9 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                     </tbody>
                                 </table>
                             </div>
-                            
+
                             {/* Pagination Controls */}
-                            <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4 bg-slate-50">
+                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-200 px-4 py-3 bg-slate-50">
                                 <div className="flex items-center gap-2">
                                     <button
                                         onClick={() => handlePageChange(1)}
@@ -537,6 +587,17 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                     </button>
                                 </div>
                             </div>
+
+                            {assignmentSuccess && (
+                                <div className="mx-6 mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                                    <div className="flex items-start gap-2">
+                                        <CheckCircle className="mt-0.5 h-5 w-5 text-emerald-600" />
+                                        <div className="text-sm text-emerald-800">
+                                            Service successfully assigned ({assignedCount} of {selectedBooking.services.length} services assigned)
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="flex-1 overflow-y-auto p-6 space-y-6">
                                 {/* Customer Details */}
@@ -826,6 +887,7 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                     </div>
                 )}
             </div>
-        </AuthenticatedLayout>
+            </AuthenticatedLayout>
+        </>
     );
 }

@@ -438,7 +438,14 @@ class BookingController extends Controller
             ->whereNotNull('image')
             ->orderBy('updated_at', 'desc')
             ->take(10)
-            ->get();
+            ->get()
+            ->map(function ($bookingService) {
+                // Convert relative image path to full URL
+                if ($bookingService->image) {
+                    $bookingService->image_url = url('/storage/' . $bookingService->image);
+                }
+                return $bookingService;
+            });
 
         return response()->json(['success' => true, 'data' => $completedServices]);
     }
@@ -464,7 +471,14 @@ class BookingController extends Controller
             ->whereNotNull('image')
             ->orderBy('updated_at', 'desc')
             ->take(10)
-            ->get();
+            ->get()
+            ->map(function ($bookingService) {
+                // Convert relative image path to full URL
+                if ($bookingService->image) {
+                    $bookingService->image_url = url('/storage/' . $bookingService->image);
+                }
+                return $bookingService;
+            });
 
         return response()->json(['success' => true, 'data' => $completedServices]);
     }
