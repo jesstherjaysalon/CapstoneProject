@@ -9,6 +9,7 @@ use App\Providers\RouteServiceProvider;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 class CustomerFaceVerificationController extends Controller
@@ -18,9 +19,11 @@ class CustomerFaceVerificationController extends Controller
         $request->validate([
             'face_image' => ['required', 'image', 'mimes:jpeg,png,jpg', 'max:5120'],
             'user_id' => ['required'],
+            'pending_token' => ['required', 'string'],
         ]);
 
-        $userId = $request->input('user_id');
+        $pending = Cache::get('mobile_login:'.$request->input('pending_token'));
+        $userId = $pending['user_id'] ?? null;
 
         if (! $userId) {
             return response()->json([
@@ -147,12 +150,17 @@ class CustomerFaceVerificationController extends Controller
             ], 422);
         }
 
-        Auth::loginUsingId($user->id);
+        Cache::forget('mobile_login:'.$request->input('pending_token'));
+        $token = $user->createToken('mobile-app-token')->plainTextToken;
 
         return response()->json([
             'verified' => true,
             'user_id' => $user->id,
             'message' => 'Face matched.',
+            'data' => [
+                'user' => $user->only(['id', 'name', 'email', 'role', 'status']),
+                'token' => $token,
+            ],
             'redirect_url' => RouteServiceProvider::homeForRole($user->role),
         ]);
     }

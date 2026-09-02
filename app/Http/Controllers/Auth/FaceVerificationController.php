@@ -50,7 +50,7 @@ class FaceVerificationController extends Controller
 
         $user = User::find($userId);
 
-        if (! $user || $user->status !== User::STATUS_ACTIVE || $user->role !== 'Staff') {
+        if (! $user || $user->status !== User::STATUS_ACTIVE) {
             return response()->json([
                 'verified' => false,
                 'message' => 'Face verification is not authorized for this account.',

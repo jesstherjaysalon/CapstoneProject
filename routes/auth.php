@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\ConfirmablePasswordController;
 use App\Http\Controllers\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\FaceVerificationController;
+use App\Http\Controllers\Auth\LoginVerificationController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
@@ -23,7 +24,16 @@ Route::middleware('guest')->group(function () {
 
     Route::post('login', [AuthenticatedSessionController::class, 'store']);
 
-    Route::middleware(['guest', 'signed', 'pending.face'])->group(function () {
+    Route::middleware(['guest', 'pending.face'])->group(function () {
+        Route::get('login-verification', [LoginVerificationController::class, 'choice'])
+            ->name('verification.choice');
+        Route::post('login-verification/otp', [LoginVerificationController::class, 'sendOtp'])
+            ->middleware('throttle:3,1')
+            ->name('verification.otp.send');
+        Route::post('login-verification/otp/verify', [LoginVerificationController::class, 'verifyOtp'])
+            ->middleware('throttle:5,1')
+            ->name('verification.otp.verify');
+
         Route::get('face-verify', [FaceVerificationController::class, 'show'])
             ->name('face.verify');
     });

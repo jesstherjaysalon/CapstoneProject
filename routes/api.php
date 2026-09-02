@@ -29,6 +29,8 @@ use App\Http\Controllers\Api\PaymentController;
 Route::middleware('guest')->group(function () {
     Route::post('/register', [RegisterController::class, 'store']);
     Route::post('/login', [LoginController::class, 'store']);
+    Route::post('/login/otp/send', [LoginController::class, 'sendOtp']);
+    Route::post('/login/otp/verify', [LoginController::class, 'verifyOtp']);
 });
 
 // Paymongo webhook (no authentication required)
