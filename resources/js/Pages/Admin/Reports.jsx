@@ -48,6 +48,8 @@ export default function Reports() {
     const { auth } = usePage().props;
     const [activeTab, setActiveTab] = useState('overview');
     const [loading, setLoading] = useState(true);
+    const [financialStartDate, setFinancialStartDate] = useState('');
+    const [financialEndDate, setFinancialEndDate] = useState('');
     const [data, setData] = useState({
         overview: null,
         financial: null,
@@ -78,24 +80,29 @@ export default function Reports() {
         }
     };
 
-    const fetchFinancialData = async () => {
+    const fetchFinancialData = async (startDate = financialStartDate, endDate = financialEndDate) => {
         try {
-            console.log('Fetching financial data...');
-            const response = await fetch('/admin/reports/financial', {
+            const params = new URLSearchParams();
+            if (startDate) params.append('start_date', startDate);
+            if (endDate) params.append('end_date', endDate);
+
+            const response = await fetch(`/admin/reports/financial?${params.toString()}`, {
                 headers: { 'Accept': 'application/json' },
             });
-            console.log('Response status:', response.status);
             const result = await response.json();
-            console.log('Financial data:', result);
             setData(prev => ({ ...prev, financial: result }));
         } catch (error) {
             console.error('Error fetching financial:', error);
         }
     };
 
-    const fetchRevenueByService = async () => {
+    const fetchRevenueByService = async (startDate = financialStartDate, endDate = financialEndDate) => {
         try {
-            const response = await fetch('/admin/reports/revenue-by-service', {
+            const params = new URLSearchParams();
+            if (startDate) params.append('start_date', startDate);
+            if (endDate) params.append('end_date', endDate);
+
+            const response = await fetch(`/admin/reports/revenue-by-service?${params.toString()}`, {
                 headers: { 'Accept': 'application/json' },
             });
             const result = await response.json();
@@ -105,9 +112,13 @@ export default function Reports() {
         }
     };
 
-    const fetchConsumableProductSales = async () => {
+    const fetchConsumableProductSales = async (startDate = financialStartDate, endDate = financialEndDate) => {
         try {
-            const response = await fetch('/admin/reports/consumable-product-sales', {
+            const params = new URLSearchParams();
+            if (startDate) params.append('start_date', startDate);
+            if (endDate) params.append('end_date', endDate);
+
+            const response = await fetch(`/admin/reports/consumable-product-sales?${params.toString()}`, {
                 headers: { 'Accept': 'application/json' },
             });
             const result = await response.json();
@@ -115,6 +126,20 @@ export default function Reports() {
         } catch (error) {
             console.error('Error fetching consumable product sales:', error);
         }
+    };
+
+    const applyFinancialFilters = () => {
+        fetchFinancialData(financialStartDate, financialEndDate);
+        fetchRevenueByService(financialStartDate, financialEndDate);
+        fetchConsumableProductSales(financialStartDate, financialEndDate);
+    };
+
+    const resetFinancialFilters = () => {
+        setFinancialStartDate('');
+        setFinancialEndDate('');
+        fetchFinancialData('', '');
+        fetchRevenueByService('', '');
+        fetchConsumableProductSales('', '');
     };
 
     const fetchBookingsData = async () => {
@@ -181,9 +206,9 @@ export default function Reports() {
         setActiveTab(tab);
         switch (tab) {
             case 'financial':
-                if (!data.financial) fetchFinancialData();
-                if (!data.revenueByService) fetchRevenueByService();
-                if (!data.consumableProductSales) fetchConsumableProductSales();
+                fetchFinancialData(financialStartDate, financialEndDate);
+                fetchRevenueByService(financialStartDate, financialEndDate);
+                fetchConsumableProductSales(financialStartDate, financialEndDate);
                 break;
             case 'bookings':
                 if (!data.bookings) fetchBookingsData();
@@ -292,6 +317,49 @@ export default function Reports() {
                 {/* Financial Tab */}
                 {activeTab === 'financial' && (
                     <div className="space-y-6">
+                        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-900">Financial Filters</h3>
+                                    <p className="text-sm text-gray-500">Filter revenue and sales by date range.</p>
+                                </div>
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:w-auto">
+                                    <div>
+                                        <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">Start Date</label>
+                                        <input
+                                            type="date"
+                                            value={financialStartDate}
+                                            onChange={(e) => setFinancialStartDate(e.target.value)}
+                                            className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-[#0D2A94] focus:outline-none"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">End Date</label>
+                                        <input
+                                            type="date"
+                                            value={financialEndDate}
+                                            onChange={(e) => setFinancialEndDate(e.target.value)}
+                                            className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-[#0D2A94] focus:outline-none"
+                                        />
+                                    </div>
+                                    <div className="flex items-end gap-2">
+                                        <button
+                                            onClick={applyFinancialFilters}
+                                            className="rounded-xl bg-[#0D2A94] px-4 py-2 text-sm font-semibold text-white hover:bg-[#132d9d]"
+                                        >
+                                            Apply
+                                        </button>
+                                        <button
+                                            onClick={resetFinancialFilters}
+                                            className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200"
+                                        >
+                                            Reset
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         {data.financial && (
                             <>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -315,7 +383,7 @@ export default function Reports() {
                                     />
                                 </div>
 
-                                <ChartCard title="Daily Revenue">
+                                <ChartCard title="Daily Revenue Trend: Service Revenue vs Product Sales">
                                     {Array.isArray(data.financial.daily_revenue) && data.financial.daily_revenue?.length > 0 ? (
                                         <ResponsiveContainer width="100%" height={300}>
                                             <LineChart data={data.financial.daily_revenue}>
@@ -323,7 +391,9 @@ export default function Reports() {
                                                 <XAxis dataKey="date" tickFormatter={formatDate} />
                                                 <YAxis />
                                                 <Tooltip formatter={(value) => `₱${Number(value).toLocaleString()}`} labelFormatter={formatDate} />
-                                                <Line type="monotone" dataKey="total" stroke="#0D2A94" strokeWidth={2} />
+                                                <Legend />
+                                                <Line type="monotone" dataKey="service_total" stroke="#0D2A94" strokeWidth={2} name="Total Revenue by Service" />
+                                                <Line type="monotone" dataKey="product_total" stroke="#10B981" strokeWidth={2} name="Total Product Sales" />
                                             </LineChart>
                                         </ResponsiveContainer>
                                     ) : (
@@ -334,20 +404,48 @@ export default function Reports() {
                                 </ChartCard>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                    <ChartCard title="Revenue by Amount Type">
-                                        {Array.isArray(data.financial.revenue_by_amount_type) && data.financial.revenue_by_amount_type?.length > 0 ? (
+                                    <ChartCard title="Revenue by Payment Method">
+                                        {Array.isArray(data.financial.revenue_by_payment_method) && data.financial.revenue_by_payment_method?.length > 0 ? (
                                             <ResponsiveContainer width="100%" height={300}>
-                                                <BarChart data={data.financial.revenue_by_amount_type}>
+                                                <BarChart data={data.financial.revenue_by_payment_method}>
                                                     <CartesianGrid strokeDasharray="3 3" />
-                                                    <XAxis dataKey="amount_type" />
+                                                    <XAxis dataKey="payment_method" />
                                                     <YAxis />
                                                     <Tooltip formatter={(value) => `₱${Number(value).toLocaleString()}`} />
-                                                    <Bar dataKey="total" fill="#0D2A94" />
+                                                    <Bar dataKey="total" fill="#0D2A94" radius={[8, 8, 0, 0]} />
                                                 </BarChart>
                                             </ResponsiveContainer>
                                         ) : (
                                             <div className="flex items-center justify-center h-[300px] text-gray-500">
-                                                No amount type data available
+                                                No payment method data available
+                                            </div>
+                                        )}
+                                    </ChartCard>
+
+                                    <ChartCard title="Payment Method Share">
+                                        {Array.isArray(data.financial.revenue_by_payment_method) && data.financial.revenue_by_payment_method?.length > 0 ? (
+                                            <ResponsiveContainer width="100%" height={300}>
+                                                <PieChart>
+                                                    <Pie
+                                                        data={data.financial.revenue_by_payment_method}
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        labelLine={false}
+                                                        outerRadius={90}
+                                                        dataKey="total"
+                                                        nameKey="payment_method"
+                                                    >
+                                                        {data.financial.revenue_by_payment_method.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip formatter={(value) => `₱${Number(value).toLocaleString()}`} />
+                                                    <Legend />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <div className="flex items-center justify-center h-[300px] text-gray-500">
+                                                No payment share data available
                                             </div>
                                         )}
                                     </ChartCard>
@@ -356,13 +454,24 @@ export default function Reports() {
                                 {Array.isArray(data.revenueByService?.revenue) && data.revenueByService.revenue?.length > 0 ? (
                                     <ChartCard title="Revenue by Service">
                                         <ResponsiveContainer width="100%" height={400}>
-                                            <BarChart data={data.revenueByService.revenue} layout="vertical">
-                                                <CartesianGrid strokeDasharray="3 3" />
-                                                <XAxis type="number" />
-                                                <YAxis dataKey="name" type="category" width={150} />
+                                            <PieChart>
+                                                <Pie
+                                                    data={data.revenueByService.revenue}
+                                                    cx="50%"
+                                                    cy="50%"
+                                                    labelLine={false}
+                                                    outerRadius={120}
+                                                    dataKey="total_revenue"
+                                                    nameKey="name"
+                                                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                                                >
+                                                    {data.revenueByService.revenue.map((entry, index) => (
+                                                        <Cell key={`service-cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                                    ))}
+                                                </Pie>
                                                 <Tooltip formatter={(value) => `₱${Number(value).toLocaleString()}`} />
-                                                <Bar dataKey="total_revenue" fill="#10B981" />
-                                            </BarChart>
+                                                <Legend />
+                                            </PieChart>
                                         </ResponsiveContainer>
                                     </ChartCard>
                                 ) : (
@@ -381,7 +490,7 @@ export default function Reports() {
                                                 <XAxis type="number" />
                                                 <YAxis dataKey="name" type="category" width={150} />
                                                 <Tooltip formatter={(value) => `₱${Number(value).toLocaleString()}`} />
-                                                <Bar dataKey="total_sales" fill="#F59E0B" />
+                                                <Bar dataKey="total_sales" fill="#F59E0B" radius={[0, 8, 8, 0]} />
                                             </BarChart>
                                         </ResponsiveContainer>
                                     </ChartCard>
@@ -392,6 +501,70 @@ export default function Reports() {
                                         </div>
                                     </ChartCard>
                                 )}
+
+                                <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                                    <div className="mb-4">
+                                        <h3 className="text-lg font-semibold text-gray-900">Detailed Financial Report</h3>
+                                        <p className="text-sm text-gray-500">A summary of payment revenue, product sales, and service revenue for the selected period.</p>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                                        <div className="rounded-xl bg-blue-50 p-4">
+                                            <p className="text-sm text-blue-700">Online Revenue</p>
+                                            <p className="mt-2 text-2xl font-bold text-blue-900">
+                                                ₱{data.financial.revenue_by_payment_method?.filter(item => item.payment_method !== 'manual' && item.payment_method !== 'cash' && item.payment_method !== 'walkin')
+                                                    .reduce((sum, item) => sum + Number(item.total || 0), 0).toLocaleString() || 0}
+                                            </p>
+                                        </div>
+                                        <div className="rounded-xl bg-emerald-50 p-4">
+                                            <p className="text-sm text-emerald-700">Manual Revenue</p>
+                                            <p className="mt-2 text-2xl font-bold text-emerald-900">
+                                                ₱{data.financial.revenue_by_payment_method?.filter(item => item.payment_method === 'manual' || item.payment_method === 'cash' || item.payment_method === 'walkin')
+                                                    .reduce((sum, item) => sum + Number(item.total || 0), 0).toLocaleString() || 0}
+                                            </p>
+                                        </div>
+                                        <div className="rounded-xl bg-violet-50 p-4">
+                                            <p className="text-sm text-violet-700">Service Revenue</p>
+                                            <p className="mt-2 text-2xl font-bold text-violet-900">
+                                                ₱{data.revenueByService?.total_revenue_by_service?.toLocaleString() || 0}
+                                            </p>
+                                        </div>
+                                        <div className="rounded-xl bg-amber-50 p-4">
+                                            <p className="text-sm text-amber-700">Product Revenue</p>
+                                            <p className="mt-2 text-2xl font-bold text-amber-900">
+                                                ₱{data.financial.total_product_sales?.toLocaleString() || 0}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-sm">
+                                            <thead>
+                                                <tr className="border-b border-gray-200 bg-gray-50">
+                                                    <th className="px-4 py-3 font-semibold text-gray-700">Revenue Type</th>
+                                                    <th className="px-4 py-3 font-semibold text-gray-700">Amount</th>
+                                                    <th className="px-4 py-3 font-semibold text-gray-700">Count</th>
+                                                    <th className="px-4 py-3 font-semibold text-gray-700">Share</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {(data.financial.revenue_by_payment_method || []).map((item, index) => {
+                                                    const totalRevenue = (data.financial.revenue_by_payment_method || []).reduce((sum, entry) => sum + Number(entry.total || 0), 0);
+                                                    const share = totalRevenue > 0 ? (Number(item.total || 0) / totalRevenue) * 100 : 0;
+
+                                                    return (
+                                                        <tr key={`${item.payment_method}-${index}`} className="border-b border-gray-100">
+                                                            <td className="px-4 py-3 font-medium text-gray-800 capitalize">{item.payment_method || 'Unknown'}</td>
+                                                            <td className="px-4 py-3 text-gray-700">₱{Number(item.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                            <td className="px-4 py-3 text-gray-700">{item.count || 0}</td>
+                                                            <td className="px-4 py-3 text-gray-700">{share.toFixed(1)}%</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
                             </>
                         )}
                     </div>

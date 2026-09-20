@@ -19,7 +19,7 @@ class AppointmentController extends Controller
         $perPage = $request->input('per_page', 10);
         $page = $request->input('page', 1);
 
-        $bookingsQuery = Booking::with(['profile.user', 'services.service', 'payments', 'manualPayments', 'services.jobOrder.staff'])
+        $bookingsQuery = Booking::with(['profile.user', 'vehicle', 'services.service', 'payments', 'manualPayments', 'services.jobOrder.staff'])
             ->orderBy('date', 'desc');
 
         $bookings = $bookingsQuery->paginate($perPage, ['*'], 'page', $page);
@@ -92,6 +92,12 @@ class AppointmentController extends Controller
                         'email' => $booking->profile?->user?->email,
                         'address' => $booking->profile?->address,
                     ],
+                    'vehicle' => $booking->vehicle ? [
+                        'id' => $booking->vehicle->id,
+                        'brand' => $booking->vehicle->brand,
+                        'model' => $booking->vehicle->model,
+                        'plate_number' => $booking->vehicle->plate_number,
+                    ] : null,
                     'services' => $booking->services->map(function (BookingService $service) {
                         return [
                             'id' => $service->id,

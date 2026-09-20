@@ -48,6 +48,9 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
             const bookingId = booking.id.toString();
             const date = booking.date || '';
             const bookingStatus = booking.status || '';
+            const vehicleBrand = booking.vehicle?.brand || '';
+            const vehicleModel = booking.vehicle?.model || '';
+            const vehiclePlate = booking.vehicle?.plate_number || '';
             // filter by booking status if set
             if (bookingStatusFilter && booking.status !== bookingStatusFilter) {
                 return false;
@@ -64,7 +67,7 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                     .some((value) => value.toLowerCase().includes(query));
             });
 
-            const baseMatch = [customerName, customerEmail, customerPhone, bookingId, date, bookingStatus]
+            const baseMatch = [customerName, customerEmail, customerPhone, bookingId, date, bookingStatus, vehicleBrand, vehicleModel, vehiclePlate]
                 .some((value) => value.toLowerCase().includes(query));
 
             // if search query exists, match either base fields or service fields
@@ -102,6 +105,25 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
             accessorKey: 'customer.phone',
             header: 'Phone',
             cell: (info) => info.getValue() || '-',
+        },
+        {
+            accessorKey: 'vehicle',
+            header: 'Vehicle',
+            cell: (info) => {
+                const vehicle = info.getValue();
+
+                if (!vehicle) {
+                    return <span className="text-slate-400">No vehicle</span>;
+                }
+
+                return (
+                    <div className="space-y-0.5">
+                        <div className="font-semibold text-slate-800">{vehicle.model || 'Unknown model'}</div>
+                        <div className="text-[11px] text-slate-600">{vehicle.brand || 'Unknown brand'}</div>
+                        <div className="text-[11px] text-slate-500">{vehicle.plate_number || 'No plate number'}</div>
+                    </div>
+                );
+            },
         },
         {
             accessorKey: 'date',
@@ -341,10 +363,10 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                     background: #94a3b8;
                 }
             `}</style>
-            <AuthenticatedLayout user={auth.user} header={<h2 className="font-semibold text-xl text-gray-800 leading-tight">Appointments</h2>}>
+            <AuthenticatedLayout user={auth.user} header={<h2 className="font-semibold text-lg text-gray-800 leading-tight">Appointments</h2>}>
             <Head title="Appointments" />
 
-            <div className="space-y-6 py-6 px-4">
+            <div className="space-y-2 py-2 px-2">
                 {flash.success && (
                     <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
                         <div className="flex items-start gap-2">
@@ -354,11 +376,11 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                     </div>
                 )}
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-6" style={{ boxShadow: '0 4px 20px rgba(30, 58, 138, 0.15)' }}>
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="rounded-2xl border border-slate-200 bg-white p-2.5" style={{ boxShadow: '0 4px 20px rgba(30, 58, 138, 0.15)' }}>
+                    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                         <div>
-                            <h1 className="text-2xl font-bold text-slate-900">Appointment Management</h1>
-                            <p className="mt-1 text-sm text-slate-600">
+                            <h1 className="text-lg font-bold text-slate-900">Appointment Management</h1>
+                            <p className="mt-0.5 text-xs text-slate-600">
                                 Monitor bookings, update statuses, and quickly locate appointments.
                             </p>
                         </div>
@@ -370,17 +392,17 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
                                 placeholder="Search bookings..."
-                                className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-10 pr-4 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
+                                className="w-full rounded-xl border border-slate-300 bg-white py-1.5 pl-9 pr-3 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
                             />
                         </div>
                     </div>
 
-                    <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex gap-3 items-center flex-wrap">
                             <select
                                 value={bookingStatusFilter}
                                 onChange={(e) => setBookingStatusFilter(e.target.value)}
-                                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none"
+                                className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:border-indigo-500 focus:outline-none"
                             >
                                 <option value="">All booking statuses</option>
                                 {bookingStatuses.map((s) => (
@@ -391,7 +413,7 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                             <select
                                 value={serviceStatusFilter}
                                 onChange={(e) => setServiceStatusFilter(e.target.value)}
-                                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none"
+                                className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:border-indigo-500 focus:outline-none"
                             >
                                 <option value="">All service statuses</option>
                                 {serviceStatuses.map((s) => (
@@ -401,41 +423,41 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
 
                             <button
                                 onClick={() => { setBookingStatusFilter(''); setServiceStatusFilter(''); setSearch(''); }}
-                                className="rounded-xl bg-slate-100 px-4 py-2 text-sm text-slate-700 hover:bg-slate-200 transition"
+                                className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-200 transition"
                             >
                                 Clear Filters
                             </button>
                         </div>
                     </div>
 
-                    <div className="mt-6 grid gap-4 md:grid-cols-3">
-                        <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5 hover:shadow-md transition-shadow">
+                    <div className="mt-3 grid gap-2.5 md:grid-cols-3">
+                        <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-2.5 hover:shadow-md transition-shadow">
                             <div className="flex items-start justify-between">
                                 <div>
-                                    <p className="text-sm font-semibold text-slate-600">Total Bookings</p>
-                                    <p className="mt-2 text-3xl font-bold text-slate-900">{bookingSummary.total}</p>
+                                    <p className="text-xs font-semibold text-slate-600">Total Bookings</p>
+                                    <p className="mt-1 text-xl font-bold text-slate-900">{bookingSummary.total}</p>
                                 </div>
                                 <div className="rounded-xl bg-indigo-100 p-3">
                                     <ClipboardList className="h-6 w-6 text-indigo-600" />
                                 </div>
                             </div>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-amber-50 to-white p-5 hover:shadow-md transition-shadow">
+                        <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-amber-50 to-white p-2.5 hover:shadow-md transition-shadow">
                             <div className="flex items-start justify-between">
                                 <div>
-                                    <p className="text-sm font-semibold text-slate-600">Pending</p>
-                                    <p className="mt-2 text-3xl font-bold text-amber-600">{bookingSummary.pending}</p>
+                                    <p className="text-xs font-semibold text-slate-600">Pending</p>
+                                    <p className="mt-1 text-xl font-bold text-amber-600">{bookingSummary.pending}</p>
                                 </div>
                                 <div className="rounded-xl bg-amber-100 p-3">
                                     <Clock className="h-6 w-6 text-amber-600" />
                                 </div>
                             </div>
                         </div>
-                        <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-emerald-50 to-white p-5 hover:shadow-md transition-shadow">
+                        <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-emerald-50 to-white p-2.5 hover:shadow-md transition-shadow">
                             <div className="flex items-start justify-between">
                                 <div>
-                                    <p className="text-sm font-semibold text-slate-600">Completed</p>
-                                    <p className="mt-2 text-3xl font-bold text-emerald-600">{bookingSummary.completed}</p>
+                                    <p className="text-xs font-semibold text-slate-600">Completed</p>
+                                    <p className="mt-1 text-xl font-bold text-emerald-600">{bookingSummary.completed}</p>
                                 </div>
                                 <div className="rounded-xl bg-emerald-100 p-3">
                                     <CheckCircle className="h-6 w-6 text-emerald-600" />
@@ -459,12 +481,12 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                     ) : (
                         <>
                             <div className="overflow-x-auto custom-scrollbar">
-                                <table className="w-full min-w-[1200px]">
+                                <table className="w-full min-w-[920px]">
                                     <thead>
                                         {table.getHeaderGroups().map((headerGroup) => (
                                             <tr key={headerGroup.id} className="border-b border-slate-200 bg-slate-50">
                                                 {headerGroup.headers.map((header) => (
-                                                    <th key={header.id} className="px-4 py-2 text-left text-xs font-semibold text-slate-600 uppercase tracking-wide whitespace-nowrap">
+                                                    <th key={header.id} className="px-2.5 py-1.5 text-left text-[10px] font-semibold text-slate-600 uppercase tracking-wide whitespace-nowrap">
                                                         {header.isPlaceholder
                                                             ? null
                                                             : flexRender(
@@ -480,7 +502,7 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                         {table.getRowModel().rows.map((row) => (
                                             <tr key={row.id} className="hover:bg-slate-50 transition">
                                                 {row.getVisibleCells().map((cell) => (
-                                                    <td key={cell.id} className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap">
+                                                    <td key={cell.id} className="px-2.5 py-2 text-xs text-slate-700 whitespace-nowrap">
                                                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                                                     </td>
                                                 ))}
@@ -491,19 +513,19 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                             </div>
 
                             {/* Pagination Controls */}
-                            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-200 px-4 py-3 bg-slate-50">
+                            <div className="flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-200 px-2.5 py-2 bg-slate-50">
                                 <div className="flex items-center gap-2">
                                     <button
                                         onClick={() => handlePageChange(1)}
                                         disabled={currentPage === 1}
-                                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
                                     >
                                         First
                                     </button>
                                     <button
                                         onClick={() => handlePageChange(currentPage - 1)}
                                         disabled={currentPage === 1}
-                                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-1"
+                                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-1"
                                     >
                                         <ChevronLeft size={16} /> Previous
                                     </button>
@@ -523,7 +545,7 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                                 <button
                                                     key={pageNum}
                                                     onClick={() => handlePageChange(pageNum)}
-                                                    className={`min-w-[36px] rounded-lg px-3 py-2 text-sm font-medium transition ${
+                                                    className={`min-w-[30px] rounded-lg px-2 py-1.5 text-xs font-medium transition ${
                                                         currentPage === pageNum
                                                             ? 'bg-indigo-600 text-white'
                                                             : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
@@ -537,24 +559,24 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                     <button
                                         onClick={() => handlePageChange(currentPage + 1)}
                                         disabled={currentPage === (pagination?.last_page || 1)}
-                                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-1"
+                                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-1"
                                     >
                                         Next <ChevronRight size={16} />
                                     </button>
                                     <button
                                         onClick={() => handlePageChange(pagination?.last_page || 1)}
                                         disabled={currentPage === (pagination?.last_page || 1)}
-                                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
                                     >
                                         Last
                                     </button>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    <span className="text-sm text-slate-600">Rows per page:</span>
+                                    <span className="text-xs text-slate-600">Rows per page:</span>
                                     <select
                                         value={pageSize}
                                         onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-                                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none"
+                                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:border-indigo-500 focus:outline-none"
                                     >
                                         {[5, 10, 20, 30, 50].map((size) => (
                                             <option key={size} value={size}>
@@ -621,6 +643,28 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                             <p className="text-sm font-semibold text-slate-900">{selectedBooking.customer.address || '-'}</p>
                                         </div>
                                     </div>
+                                </div>
+
+                                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                    <h3 className="text-sm font-bold text-slate-900 mb-4">Vehicle Details</h3>
+                                    {selectedBooking.vehicle ? (
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div>
+                                                <p className="text-xs text-slate-500 mb-1">Brand</p>
+                                                <p className="text-sm font-semibold text-slate-900">{selectedBooking.vehicle.brand || '-'}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-slate-500 mb-1">Model</p>
+                                                <p className="text-sm font-semibold text-slate-900">{selectedBooking.vehicle.model || '-'}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-slate-500 mb-1">Plate Number</p>
+                                                <p className="text-sm font-semibold text-slate-900">{selectedBooking.vehicle.plate_number || '-'}</p>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-slate-500">No vehicle assigned to this booking.</p>
+                                    )}
                                 </div>
 
                                 {/* Booking Information */}

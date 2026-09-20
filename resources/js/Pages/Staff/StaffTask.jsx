@@ -30,6 +30,8 @@ export default function StaffTask({ auth, jobOrders, products }) {
     const [capturedImage, setCapturedImage] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
     const [toast, setToast] = useState(null);
+    const [isBlockedModalOpen, setIsBlockedModalOpen] = useState(false);
+    const [blockedMessage, setBlockedMessage] = useState('');
     const fileInputRef = useRef(null);
 
     const filteredJobOrders = useMemo(() => {
@@ -42,31 +44,40 @@ export default function StaffTask({ auth, jobOrders, products }) {
         return jobOrders.filter((jobOrder) => {
             const serviceName = jobOrder.service?.service_name || '';
             const customerName = jobOrder.customer?.name || '';
+            const vehicleBrand = jobOrder.vehicle?.brand || '';
+            const vehicleModel = jobOrder.vehicle?.model || '';
+            const vehiclePlate = jobOrder.vehicle?.plate_number || '';
             const status = jobOrder.status || '';
 
             if (statusFilter && jobOrder.status !== statusFilter) {
                 return false;
             }
 
-            return [serviceName, customerName, status]
+            return [serviceName, customerName, vehicleBrand, vehicleModel, vehiclePlate, status]
                 .some((value) => value.toLowerCase().includes(query));
         });
     }, [jobOrders, search, statusFilter]);
 
     const handleStatusChange = (jobOrderId, newStatus) => {
-        // Check if trying to complete without image
         if (newStatus === 'completed') {
             const jobOrder = jobOrders.find(jo => jo.id === jobOrderId);
+            const hasOutstandingReturnableItems = (jobOrder?.product_usages || []).some(
+                (usage) => usage.is_returnable && !usage.returned_at
+            );
+
             if (!jobOrder?.service?.image) {
-                setToast({
-                    type: 'error',
-                    message: 'Please upload a completion photo before marking the task as completed.'
-                });
-                setTimeout(() => setToast(null), 3000);
+                setBlockedMessage('Please upload a completion photo before marking the task as completed.');
+                setIsBlockedModalOpen(true);
+                return;
+            }
+
+            if (hasOutstandingReturnableItems) {
+                setBlockedMessage('This task cannot be completed until all returnable products are returned.');
+                setIsBlockedModalOpen(true);
                 return;
             }
         }
-        
+
         router.put(route('staff.tasks.update', jobOrderId), {
             status: newStatus,
         });
@@ -97,6 +108,20 @@ export default function StaffTask({ auth, jobOrders, products }) {
             });
 
             if (response.ok) {
+                setIsViewRequestsModalOpen(false);
+                setSelectedJobOrder((currentJobOrder) => {
+                    if (!currentJobOrder) return null;
+
+                    return {
+                        ...currentJobOrder,
+                        product_usages: (currentJobOrder.product_usages || []).map((usage) =>
+                            usage.id === usageId
+                                ? { ...usage, returned_at: new Date().toISOString(), status: 'Approved' }
+                                : usage
+                        ),
+                    };
+                });
+
                 router.reload();
             } else {
                 const error = await response.json();
@@ -318,6 +343,12 @@ export default function StaffTask({ auth, jobOrders, products }) {
                                                 </div>
                                                 <span className="font-medium text-slate-900">{jobOrder.customer?.name || 'Unknown'}</span>
                                             </div>
+                                            <div className="rounded-xl bg-slate-50 p-2 text-xs text-slate-700">
+                                                <p className="text-slate-500">Vehicle</p>
+                                                <p className="font-medium text-slate-900">
+                                                    {jobOrder.vehicle ? `${jobOrder.vehicle.brand || 'Unknown'} ${jobOrder.vehicle.model || ''} • ${jobOrder.vehicle.plate_number || 'No plate'}`.trim() : 'No vehicle'}
+                                                </p>
+                                            </div>
                                             <div className="grid grid-cols-2 gap-3">
                                                 <div className="flex items-center gap-2 text-slate-700 bg-slate-50 rounded-xl p-2">
                                                     <Calendar size={14} className="text-slate-500" />
@@ -404,6 +435,7 @@ export default function StaffTask({ auth, jobOrders, products }) {
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">ID</th>
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Service</th>
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Customer</th>
+                                                <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Vehicle</th>
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Start Time</th>
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">End Time</th>
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Status</th>
@@ -426,6 +458,16 @@ export default function StaffTask({ auth, jobOrders, products }) {
                                                             </div>
                                                             <span className="text-sm text-slate-700">{jobOrder.customer?.name || 'Unknown'}</span>
                                                         </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-sm text-slate-700">
+                                                        {jobOrder.vehicle ? (
+                                                            <div className="space-y-0.5">
+                                                                <div className="font-medium text-slate-900">{jobOrder.vehicle.model || 'Unknown model'}</div>
+                                                                <div className="text-xs text-slate-500">{jobOrder.vehicle.brand || 'Unknown brand'} • {jobOrder.vehicle.plate_number || 'No plate'}</div>
+                                                            </div>
+                                                        ) : (
+                                                            'No vehicle'
+                                                        )}
                                                     </td>
                                                     <td className="px-6 py-4 text-sm text-slate-700">
                                                         {jobOrder.start_time ? (
@@ -512,6 +554,32 @@ export default function StaffTask({ auth, jobOrders, products }) {
                         </>
                     )}
                 </div>
+
+                {/* Completion Blocked Modal */}
+                {isBlockedModalOpen && (
+                    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 p-4">
+                        <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+                            <div className="flex items-start gap-3">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-600">
+                                    <X size={22} />
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className="text-xl font-semibold text-slate-900">Completion blocked</h3>
+                                    <p className="mt-2 text-sm leading-6 text-slate-600">{blockedMessage}</p>
+                                </div>
+                            </div>
+
+                            <div className="mt-6 flex justify-end gap-3">
+                                <button
+                                    onClick={() => setIsBlockedModalOpen(false)}
+                                    className="rounded-full bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-200 transition"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Inventory Request Modal */}
                 {isRequestModalOpen && selectedJobOrder && (

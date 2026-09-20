@@ -29,7 +29,7 @@ class StaffDashboardController extends Controller
     {
         $staff = Auth::user()->profile;
 
-        $jobOrders = JobOrder::with(['bookingService.service', 'bookingService.booking.profile'])
+        $jobOrders = JobOrder::with(['bookingService.service', 'bookingService.booking.profile', 'bookingService.booking.vehicle'])
             ->where('profile_id', $staff->id)
             ->where('status', '!=', 'completed')
             ->orderBy('created_at', 'desc')
@@ -72,6 +72,11 @@ class StaffDashboardController extends Controller
                         ? trim(sprintf('%s %s', $jobOrder->bookingService->booking->profile->first_name ?? '', $jobOrder->bookingService->booking->profile->last_name ?? ''))
                         : 'Unknown',
                 ],
+                'vehicle' => $jobOrder->bookingService?->booking?->vehicle ? [
+                    'brand' => $jobOrder->bookingService->booking->vehicle->brand,
+                    'model' => $jobOrder->bookingService->booking->vehicle->model,
+                    'plate_number' => $jobOrder->bookingService->booking->vehicle->plate_number,
+                ] : null,
                 'start_time' => $jobOrder->start_time?->format('Y-m-d H:i:s'),
                 'end_time' => $jobOrder->end_time?->format('Y-m-d H:i:s'),
                 'status' => $jobOrder->status,
@@ -110,7 +115,7 @@ class StaffDashboardController extends Controller
     {
         $staff = Auth::user()->profile;
 
-        $jobOrders = JobOrder::with(['bookingService.service', 'bookingService.booking.profile'])
+        $jobOrders = JobOrder::with(['bookingService.service', 'bookingService.booking.profile', 'bookingService.booking.vehicle'])
             ->where('profile_id', $staff->id)
             ->where('status', 'completed')
             ->orderBy('created_at', 'desc')
@@ -150,6 +155,11 @@ class StaffDashboardController extends Controller
                         ? trim(sprintf('%s %s', $jobOrder->bookingService->booking->profile->first_name ?? '', $jobOrder->bookingService->booking->profile->last_name ?? ''))
                         : 'Unknown',
                 ],
+                'vehicle' => $jobOrder->bookingService?->booking?->vehicle ? [
+                    'brand' => $jobOrder->bookingService->booking->vehicle->brand,
+                    'model' => $jobOrder->bookingService->booking->vehicle->model,
+                    'plate_number' => $jobOrder->bookingService->booking->vehicle->plate_number,
+                ] : null,
                 'start_time' => $jobOrder->start_time?->format('Y-m-d H:i:s'),
                 'end_time' => $jobOrder->end_time?->format('Y-m-d H:i:s'),
                 'status' => $jobOrder->status,
@@ -177,11 +187,22 @@ class StaffDashboardController extends Controller
             return redirect()->back()->with('error', 'Unauthorized action.');
         }
 
-        // If completing, require an image
+        // If completing, require an image and ensure all returnable items have been returned
         if ($request->input('status') === 'completed') {
             $bookingService = $jobOrder->bookingService;
             if (!$bookingService || !$bookingService->image) {
                 return redirect()->back()->with('error', 'Please upload a completion image before marking the task as completed.');
+            }
+
+            $hasOutstandingReturnableUsage = ServiceProductUsage::where('job_order_id', $jobOrder->id)
+                ->whereNull('returned_at')
+                ->whereHas('product.inventoryCategory', function ($query) {
+                    $query->where('is_asset', true);
+                })
+                ->exists();
+
+            if ($hasOutstandingReturnableUsage) {
+                return redirect()->back()->with('error', 'This task cannot be completed until all returnable products are returned.');
             }
         }
 

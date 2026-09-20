@@ -19,7 +19,7 @@ export default defineConfig({
         cors: true, // 🔥 IMPORTANT FIX
 
         hmr: {
-            host: '10.191.171.25',
+            host: '192.168.1.44',
             protocol: 'ws',
         },
     },

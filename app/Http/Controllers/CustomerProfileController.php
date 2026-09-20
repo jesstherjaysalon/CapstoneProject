@@ -129,22 +129,26 @@ class CustomerProfileController extends Controller
         $profile = $user->profile;
 
         if (!$profile) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Please complete your profile first.',
-            ], 422);
+            return back()->withErrors([
+                'face_image' => 'Please complete your profile first.',
+            ]);
         }
 
         $file = $request->file('face_image');
+
+        if (!$file || !$file->isValid()) {
+            return back()->withErrors([
+                'face_image' => 'Unable to process captured image. Please try again.',
+            ]);
+        }
 
         $tempName = Str::uuid()->toString().'.'.$file->getClientOriginalExtension();
         $tempPath = Storage::disk('local')->putFileAs('temp_faces', $file, $tempName);
 
         if (!$tempPath) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unable to save captured image. Please try again.',
-            ], 500);
+            return back()->withErrors([
+                'face_image' => 'Unable to save captured image. Please try again.',
+            ]);
         }
 
         $tempFullPath = Storage::disk('local')->path($tempPath);
@@ -155,10 +159,9 @@ class CustomerProfileController extends Controller
         } catch (\RuntimeException $exception) {
             Storage::disk('local')->delete($tempPath);
 
-            return response()->json([
-                'success' => false,
-                'message' => $exception->getMessage(),
-            ], 500);
+            return back()->withErrors([
+                'face_image' => $exception->getMessage(),
+            ]);
         }
 
         $finalName = Str::uuid()->toString().'.'.$file->getClientOriginalExtension();
