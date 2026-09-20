@@ -3,7 +3,10 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\FaceRecognitionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 class ProfileTest extends TestCase
@@ -95,5 +98,38 @@ class ProfileTest extends TestCase
             ->assertRedirect('/profile');
 
         $this->assertNotNull($user->fresh());
+    }
+
+    public function test_customer_face_registration_quality_failure_returns_inertia_validation_error(): void
+    {
+        $user = User::factory()->create();
+        $user->profile()->create([
+            'first_name' => 'Test',
+            'last_name' => 'User',
+            'phone' => '09123456789',
+            'address' => 'Test Address',
+        ]);
+
+        $file = UploadedFile::fake()->image('face.jpg');
+        $route = URL::temporarySignedRoute(
+            'customer.face.store',
+            now()->addMinutes(5),
+            ['user' => $user->id]
+        );
+
+        $mock = \Mockery::mock(FaceRecognitionService::class);
+        $mock->shouldReceive('encodeFromPath')->once()->andThrow(new \RuntimeException('Image is too blurry. Please adjust and try again.'));
+        $this->app->instance(FaceRecognitionService::class, $mock);
+
+        $response = $this->post($route, ['face_image' => $file]);
+
+        $response
+            ->assertSessionHasErrors('face_image')
+            ->assertSessionHas('errors');
+
+        $messages = session('errors')->get('face_image');
+        $messageText = is_array($messages) ? implode(' ', $messages) : (string) $messages;
+
+        $this->assertStringContainsString('Image is too blurry', $messageText);
     }
 }

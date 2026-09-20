@@ -109,7 +109,7 @@ class ReportsController extends Controller
             'total' => $manualPaymentTotal,
         ]);
 
-        // Get online payments daily revenue
+        // Get online payments daily service revenue
         $onlineDailyRevenue = Payment::where('status', 'paid')
             ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
                 return $query->whereBetween('created_at', [$startDate, $endDate]);
@@ -119,7 +119,7 @@ class ReportsController extends Controller
             ->get()
             ->keyBy('date');
 
-        // Get manual payments daily revenue
+        // Get manual payments daily service revenue
         $manualDailyRevenue = ManualPayment::when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
                 return $query->whereBetween('created_at', [$startDate, $endDate]);
             })
@@ -128,14 +128,30 @@ class ReportsController extends Controller
             ->get()
             ->keyBy('date');
 
-        // Merge daily revenues
-        $allDates = $onlineDailyRevenue->keys()->merge($manualDailyRevenue->keys())->unique()->sort();
-        $dailyRevenue = $allDates->map(function ($date) use ($onlineDailyRevenue, $manualDailyRevenue) {
-            $onlineTotal = $onlineDailyRevenue->get($date)?->total ?? 0;
-            $manualTotal = $manualDailyRevenue->get($date)?->total ?? 0;
+        // Get product sales daily revenue from approved consumable product usage
+        $productDailyRevenue = DB::table('service_product_usage as spu')
+            ->join('products as p', 'spu.product_id', '=', 'p.id')
+            ->where('spu.status', 'Approved')
+            ->whereNotNull('p.price')
+            ->where('p.price', '>', 0)
+            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
+                return $query->whereBetween('spu.created_at', [$startDate, $endDate]);
+            })
+            ->selectRaw('DATE(spu.created_at) as date, SUM(p.price * spu.quantity_used) as total')
+            ->groupBy('date')
+            ->get()
+            ->keyBy('date');
+
+        // Merge daily revenues including product sales and service revenue separately
+        $allDates = $onlineDailyRevenue->keys()->merge($manualDailyRevenue->keys())->merge($productDailyRevenue->keys())->unique()->sort();
+        $dailyRevenue = $allDates->map(function ($date) use ($onlineDailyRevenue, $manualDailyRevenue, $productDailyRevenue) {
+            $serviceTotal = ($onlineDailyRevenue->get($date)?->total ?? 0) + ($manualDailyRevenue->get($date)?->total ?? 0);
+            $productTotal = $productDailyRevenue->get($date)?->total ?? 0;
             return (object) [
                 'date' => $date,
-                'total' => $onlineTotal + $manualTotal,
+                'service_total' => $serviceTotal,
+                'product_total' => $productTotal,
+                'total' => $serviceTotal + $productTotal,
             ];
         })->values();
 
@@ -238,14 +254,34 @@ class ReportsController extends Controller
         $startDate = $request->get('start_date');
         $endDate = $request->get('end_date');
 
-        $productSales = DB::table('service_product_usage')
-            ->join('products', 'service_product_usage.product_id', '=', 'products.id')
-            ->where('service_product_usage.status', 'Approved')
+        $productSales = DB::table('service_product_usage as spu')
+            ->join('products as p', 'spu.product_id', '=', 'p.id')
+            ->join('job_orders as jo', 'spu.job_order_id', '=', 'jo.id')
+            ->join('booking_services as bs', 'jo.booking_service_id', '=', 'bs.id')
+            ->join('bookings as b', 'bs.booking_id', '=', 'b.id')
+            ->join('profiles as customer_profile', 'b.profile_id', '=', 'customer_profile.id')
+            ->join('users as customer_user', 'customer_profile.user_id', '=', 'customer_user.id')
+            ->leftJoin('profiles as staff_profile', 'jo.profile_id', '=', 'staff_profile.id')
+            ->leftJoin('users as staff_user', 'staff_profile.user_id', '=', 'staff_user.id')
+            ->leftJoin('services as s', 'bs.service_id', '=', 's.id')
+            ->where('spu.status', 'Approved')
             ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('service_product_usage.created_at', [$startDate, $endDate]);
+                return $query->whereBetween('spu.created_at', [$startDate, $endDate]);
             })
-            ->selectRaw('products.name, SUM(service_product_usage.quantity_used) as total_quantity, products.price, SUM(service_product_usage.quantity_used * products.price) as total_sales')
-            ->groupBy('products.id', 'products.name', 'products.price')
+            ->select([
+                'spu.id as usage_id',
+                'p.id as product_id',
+                'p.name as product_name',
+                'p.name',
+                'customer_user.name as customer_name',
+                'staff_user.name as staff_name',
+                's.name as service_name',
+                'b.id as booking_id',
+                'b.date as booking_date',
+                'spu.quantity_used',
+                'p.price',
+                DB::raw('(spu.quantity_used * p.price) as total_sales'),
+            ])
             ->orderByDesc('total_sales')
             ->get();
 

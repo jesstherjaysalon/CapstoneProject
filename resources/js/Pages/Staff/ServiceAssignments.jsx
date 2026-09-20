@@ -44,8 +44,11 @@ export default function ServiceAssignments({ auth, jobOrders }) {
         return jobOrders.filter((jobOrder) => {
             const serviceName = jobOrder.service?.service_name || '';
             const customerName = jobOrder.customer?.name || '';
+            const vehicleBrand = jobOrder.vehicle?.brand || '';
+            const vehicleModel = jobOrder.vehicle?.model || '';
+            const vehiclePlate = jobOrder.vehicle?.plate_number || '';
 
-            return [serviceName, customerName]
+            return [serviceName, customerName, vehicleBrand, vehicleModel, vehiclePlate]
                 .some((value) => value.toLowerCase().includes(query));
         });
     }, [jobOrders, search]);
@@ -153,6 +156,12 @@ export default function ServiceAssignments({ auth, jobOrders }) {
                                                 </div>
                                                 <span className="font-medium text-slate-900">{jobOrder.customer?.name || 'Unknown'}</span>
                                             </div>
+                                            <div className="rounded-xl bg-slate-50 p-2 text-xs text-slate-700">
+                                                <p className="text-slate-500">Vehicle</p>
+                                                <p className="font-medium text-slate-900">
+                                                    {jobOrder.vehicle ? `${jobOrder.vehicle.brand || 'Unknown'} ${jobOrder.vehicle.model || ''} • ${jobOrder.vehicle.plate_number || 'No plate'}`.trim() : 'No vehicle'}
+                                                </p>
+                                            </div>
                                             <div className="flex items-center gap-2 text-slate-700 bg-slate-50 rounded-xl p-2">
                                                 <Star size={14} className="text-amber-400" />
                                                 <div className="text-xs">
@@ -212,6 +221,7 @@ export default function ServiceAssignments({ auth, jobOrders }) {
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">ID</th>
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Service</th>
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Customer</th>
+                                                <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Vehicle</th>
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Rating</th>
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">Start Time</th>
                                                 <th className="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">End Time</th>
@@ -235,6 +245,16 @@ export default function ServiceAssignments({ auth, jobOrders }) {
                                                             </div>
                                                             <span className="text-sm text-slate-700">{jobOrder.customer?.name || 'Unknown'}</span>
                                                         </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-sm text-slate-700">
+                                                        {jobOrder.vehicle ? (
+                                                            <div className="space-y-0.5">
+                                                                <div className="font-medium text-slate-900">{jobOrder.vehicle.model || 'Unknown model'}</div>
+                                                                <div className="text-xs text-slate-500">{jobOrder.vehicle.brand || 'Unknown brand'} • {jobOrder.vehicle.plate_number || 'No plate'}</div>
+                                                            </div>
+                                                        ) : (
+                                                            'No vehicle'
+                                                        )}
                                                     </td>
                                                     <td className="px-6 py-4">
                                                         {renderStars(jobOrder.service?.rating)}

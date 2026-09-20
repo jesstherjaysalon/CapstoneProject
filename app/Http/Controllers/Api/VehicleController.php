@@ -13,6 +13,7 @@ class VehicleController extends Controller
     public function index()
     {
         $vehicles = Vehicle::with('user')
+            ->where('user_id', Auth::id())
             ->orderBy('created_at', 'desc')
             ->get();
 

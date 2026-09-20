@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Head } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { 
@@ -40,6 +40,10 @@ export default function InventoryManagement({ auth }) {
     const [isStockModalOpen, setIsStockModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState(null);
     const [selectedProduct, setSelectedProduct] = useState(null);
+    const [productUsageHistory, setProductUsageHistory] = useState([]);
+    const [allInventoryHistory, setAllInventoryHistory] = useState([]);
+    const [inventoryHistoryPage, setInventoryHistoryPage] = useState(1);
+    const [productSalesReport, setProductSalesReport] = useState([]);
     const [lowStockCount, setLowStockCount] = useState(0);
     const [productFormData, setProductFormData] = useState({
         supplier_id: '',
@@ -140,12 +144,53 @@ export default function InventoryManagement({ auth }) {
         }
     };
 
+    const fetchProductUsageHistory = async (productId) => {
+        try {
+            const response = await fetch(`/admin/service-product-usage?product_id=${productId}`, {
+                headers: { 'Accept': 'application/json' },
+            });
+            const data = await response.json();
+            setProductUsageHistory(data.data || data);
+        } catch (error) {
+            console.error('Error fetching product usage history:', error);
+            setProductUsageHistory([]);
+        }
+    };
+
+    const fetchInventoryHistory = async () => {
+        try {
+            const response = await fetch('/admin/service-product-usage', {
+                headers: { 'Accept': 'application/json' },
+            });
+            const data = await response.json();
+            setAllInventoryHistory(data.data || data);
+        } catch (error) {
+            console.error('Error fetching inventory history:', error);
+            setAllInventoryHistory([]);
+        }
+    };
+
+    const fetchProductSalesReport = async () => {
+        try {
+            const response = await fetch('/admin/reports/consumable-product-sales', {
+                headers: { 'Accept': 'application/json' },
+            });
+            const data = await response.json();
+            setProductSalesReport(Array.isArray(data) ? data : data.data || []);
+        } catch (error) {
+            console.error('Error fetching product sales report:', error);
+            setProductSalesReport([]);
+        }
+    };
+
     useEffect(() => {
         fetchCategories();
         fetchSuppliers();
         fetchProducts();
         fetchTransactions();
         fetchRequests();
+        fetchProductSalesReport();
+        fetchInventoryHistory();
     }, [filterType, filterFromDate, filterToDate, filterStatus]);
 
     // Category Handlers
@@ -459,6 +504,7 @@ export default function InventoryManagement({ auth }) {
         { id: 'categories', label: 'Categories', icon: Package },
         { id: 'suppliers', label: 'Suppliers', icon: Truck },
         { id: 'products', label: 'Products', icon: Box, hasAlert: true },
+        { id: 'history', label: 'Inventory History', icon: ClipboardList },
         { id: 'transactions', label: 'Stock Transactions', icon: ArrowUpCircle },
         { id: 'requests', label: 'Product Requests', icon: CheckCircle },
     ];
@@ -470,6 +516,17 @@ export default function InventoryManagement({ auth }) {
     };
 
     const pendingRequests = Array.isArray(requests) ? requests.filter(r => r.status === 'Pending').length : 0;
+
+    const inventoryHistoryPerPage = 10;
+    const inventoryHistoryTotalPages = Math.max(1, Math.ceil(allInventoryHistory.length / inventoryHistoryPerPage));
+    const paginatedInventoryHistory = useMemo(() => {
+        const start = (inventoryHistoryPage - 1) * inventoryHistoryPerPage;
+        return allInventoryHistory.slice(start, start + inventoryHistoryPerPage);
+    }, [allInventoryHistory, inventoryHistoryPage]);
+
+    useEffect(() => {
+        setInventoryHistoryPage(1);
+    }, [activeTab]);
 
     return (
         <AuthenticatedLayout user={auth.user} header={<h2 className="font-semibold text-xl text-gray-800 leading-tight">Inventory Management</h2>}>
@@ -875,6 +932,12 @@ export default function InventoryManagement({ auth }) {
                                                             </td>
                                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                                 <button
+                                                                    onClick={() => fetchProductUsageHistory(product.id)}
+                                                                    className="inline-flex items-center gap-2 rounded-full bg-cyan-100 px-3 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-200 transition mr-2"
+                                                                >
+                                                                    Usage
+                                                                </button>
+                                                                <button
                                                                     onClick={() => {
                                                                         setSelectedProduct(product);
                                                                         setStockFormData({ quantity: '', remarks: '' });
@@ -917,6 +980,246 @@ export default function InventoryManagement({ auth }) {
                                                 </tbody>
                                             </table>
                                         </div>
+                                    </div>
+                                )}
+
+                                {productUsageHistory.length > 0 && (
+                                    <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-3" style={{ boxShadow: '0 12px 30px rgba(13,42,148,0.12)' }}>
+                                        <div className="mb-3 flex items-center justify-between">
+                                            <div>
+                                                <h3 className="text-base font-semibold text-slate-900">Inventory History</h3>
+                                                <p className="text-xs text-slate-500">Product usage, customer, service, and job order tracking.</p>
+                                            </div>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full min-w-[980px] text-[11px]">
+                                                <thead>
+                                                    <tr className="border-b border-slate-200 bg-white">
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Date</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Product</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Type</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Job Order</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Category</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Vehicle</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Customer</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Service</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Stock</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-200 bg-white">
+                                                    {productUsageHistory.map((usage) => {
+                                                        const booking = usage.job_order?.booking_service?.booking;
+                                                        const vehicle = booking?.vehicle;
+                                                        const vehicleLabel = vehicle
+                                                            ? `${vehicle.brand || 'Unknown'} ${vehicle.model || ''} • ${vehicle.plate_number || 'No plate'}`.trim()
+                                                            : 'No vehicle';
+                                                        const customerName = booking?.profile
+                                                            ? `${booking.profile.first_name || ''} ${booking.profile.last_name || ''}`.trim() || 'Unknown customer'
+                                                            : 'Unknown customer';
+                                                        const jobOrderUserName = usage.job_order?.profile
+                                                            ? `${usage.job_order.profile.first_name || ''} ${usage.job_order.profile.last_name || ''}`.trim() || 'Unknown user'
+                                                            : 'Unknown user';
+                                                        const serviceName = usage.job_order?.booking_service?.service?.name || 'Service';
+                                                        const productCategory = usage.product?.inventory_category?.name || 'Uncategorized';
+                                                        const bookingDate = usage.created_at
+                                                            ? new Date(usage.created_at).toLocaleString('en-US', {
+                                                                month: 'short',
+                                                                day: 'numeric',
+                                                                year: 'numeric',
+                                                                hour: 'numeric',
+                                                                minute: '2-digit',
+                                                            })
+                                                            : 'N/A';
+                                                        const availableStock = usage.product?.current_stock ?? 0;
+
+                                                        return (
+                                                            <tr key={usage.id} className="hover:bg-slate-50 align-top">
+                                                                <td className="px-2 py-2 text-slate-700">{bookingDate}</td>
+                                                                <td className="px-2 py-2 font-semibold text-slate-900">{usage.product?.name || 'Product'}</td>
+                                                                <td className="px-2 py-2 text-slate-700">
+                                                                    <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                                                                        Used
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-2 py-2 font-semibold text-slate-900">{usage.quantity_used}</td>
+                                                                <td className="px-2 py-2 font-semibold text-slate-900">#{usage.job_order_id}</td>
+                                                                <td className="px-2 py-2 text-slate-700">{productCategory}</td>
+                                                                <td className="px-2 py-2 text-slate-700">{vehicleLabel}</td>
+                                                                <td className="px-2 py-2 text-slate-700">{customerName}</td>
+                                                                <td className="px-2 py-2 text-slate-700">{serviceName}</td>
+                                                                <td className="px-2 py-2 font-semibold text-slate-900">{availableStock}</td>
+                                                                <td className="px-2 py-2 text-slate-700">
+                                                                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusClasses[usage.status] || 'bg-slate-100 text-slate-800'}`}>
+                                                                        {usage.status}
+                                                                    </span>
+                                                                    <div className="mt-1 text-[10px] text-slate-500">Used by: {jobOrderUserName}</div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {productSalesReport.length > 0 && (
+                                    <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-5" style={{ boxShadow: '0 12px 30px rgba(13,42,148,0.12)' }}>
+                                        <div className="mb-4 flex items-center justify-between">
+                                            <div>
+                                                <h3 className="text-lg font-semibold text-slate-900">Sales Report</h3>
+                                                <p className="text-sm text-slate-500">Approved product sales tied to service appointments and customers.</p>
+                                            </div>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full">
+                                                <thead>
+                                                    <tr className="border-b border-slate-200 bg-white">
+                                                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Product</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Customer</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Staff</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Service</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                                                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Total</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-200 bg-white">
+                                                    {productSalesReport.map((sale) => (
+                                                        <tr key={sale.usage_id || sale.product_id + '-' + sale.booking_id} className="hover:bg-slate-50">
+                                                            <td className="px-4 py-3 text-sm font-semibold text-slate-900">{sale.product_name || sale.name || 'Product'}</td>
+                                                            <td className="px-4 py-3 text-sm text-slate-700">{sale.customer_name || 'Unknown'}</td>
+                                                            <td className="px-4 py-3 text-sm text-slate-700">{sale.staff_name || 'Unassigned'}</td>
+                                                            <td className="px-4 py-3 text-sm text-slate-700">{sale.service_name || 'Service'}</td>
+                                                            <td className="px-4 py-3 text-sm font-semibold text-slate-900">{sale.quantity_used || 0}</td>
+                                                            <td className="px-4 py-3 text-sm font-semibold text-emerald-700">₱{Number(sale.total_sales || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Inventory History Tab */}
+                        {activeTab === 'history' && (
+                            <div>
+                                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+                                    <div>
+                                        <h2 className="text-2xl font-semibold text-slate-900">Inventory History</h2>
+                                        <p className="mt-1 text-sm text-slate-500">Track all product usage across services, customers, vehicles, and job orders.</p>
+                                    </div>
+                                </div>
+
+                                {allInventoryHistory.length === 0 ? (
+                                    <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                                        <ClipboardList className="mx-auto mb-4 h-12 w-12 text-slate-400" />
+                                        <p className="text-sm font-semibold text-slate-700">No inventory history yet.</p>
+                                        <p className="mt-2 text-sm text-slate-500">Product usage records will appear here when staff request or use inventory.</p>
+                                    </div>
+                                ) : (
+                                    <div className="rounded-3xl border border-slate-200 bg-white overflow-hidden" style={{ boxShadow: '0 12px 30px rgba(13,42,148,0.12)' }}>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full min-w-[1100px] text-[11px]">
+                                                <thead>
+                                                    <tr className="border-b border-slate-200 bg-slate-50">
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Date</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Product</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Type</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Qty</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Job Order</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Category</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Vehicle</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Customer</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Service</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Stock</th>
+                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-200 bg-white">
+                                                    {paginatedInventoryHistory.map((usage) => {
+                                                        const booking = usage.job_order?.booking_service?.booking;
+                                                        const vehicle = booking?.vehicle;
+                                                        const vehicleLabel = vehicle
+                                                            ? `${vehicle.brand || 'Unknown'} ${vehicle.model || ''} • ${vehicle.plate_number || 'No plate'}`.trim()
+                                                            : 'No vehicle';
+                                                        const customerName = booking?.profile
+                                                            ? `${booking.profile.first_name || ''} ${booking.profile.last_name || ''}`.trim() || 'Unknown customer'
+                                                            : 'Unknown customer';
+                                                        const jobOrderUserName = usage.job_order?.profile
+                                                            ? `${usage.job_order.profile.first_name || ''} ${usage.job_order.profile.last_name || ''}`.trim() || 'Unknown user'
+                                                            : 'Unknown user';
+                                                        const serviceName = usage.job_order?.booking_service?.service?.name || 'Service';
+                                                        const productCategory = usage.product?.inventory_category?.name || 'Uncategorized';
+                                                        const bookingDate = usage.created_at
+                                                            ? new Date(usage.created_at).toLocaleString('en-US', {
+                                                                month: 'short',
+                                                                day: 'numeric',
+                                                                year: 'numeric',
+                                                                hour: 'numeric',
+                                                                minute: '2-digit',
+                                                            })
+                                                            : 'N/A';
+                                                        const availableStock = usage.product?.current_stock ?? 0;
+
+                                                        return (
+                                                            <tr key={usage.id} className="hover:bg-slate-50 align-top">
+                                                                <td className="px-2 py-2 text-slate-700">{bookingDate}</td>
+                                                                <td className="px-2 py-2 font-semibold text-slate-900">{usage.product?.name || 'Product'}</td>
+                                                                <td className="px-2 py-2 text-slate-700">
+                                                                    <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                                                                        Used
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-2 py-2 font-semibold text-slate-900">{usage.quantity_used}</td>
+                                                                <td className="px-2 py-2 font-semibold text-slate-900">#{usage.job_order_id}</td>
+                                                                <td className="px-2 py-2 text-slate-700">{productCategory}</td>
+                                                                <td className="px-2 py-2 text-slate-700">{vehicleLabel}</td>
+                                                                <td className="px-2 py-2 text-slate-700">{customerName}</td>
+                                                                <td className="px-2 py-2 text-slate-700">{serviceName}</td>
+                                                                <td className="px-2 py-2 font-semibold text-slate-900">{availableStock}</td>
+                                                                <td className="px-2 py-2 text-slate-700">
+                                                                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusClasses[usage.status] || 'bg-slate-100 text-slate-800'}`}>
+                                                                        {usage.status}
+                                                                    </span>
+                                                                    <div className="mt-1 text-[10px] text-slate-500">Used by: {jobOrderUserName}</div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        {allInventoryHistory.length > inventoryHistoryPerPage && (
+                                            <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3">
+                                                <p className="text-xs text-slate-600">
+                                                    Showing {((inventoryHistoryPage - 1) * inventoryHistoryPerPage) + 1} - {Math.min(inventoryHistoryPage * inventoryHistoryPerPage, allInventoryHistory.length)} of {allInventoryHistory.length}
+                                                </p>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => setInventoryHistoryPage((page) => Math.max(1, page - 1))}
+                                                        disabled={inventoryHistoryPage === 1}
+                                                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        Previous
+                                                    </button>
+                                                    <span className="text-xs font-medium text-slate-700">
+                                                        Page {inventoryHistoryPage} / {inventoryHistoryTotalPages}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => setInventoryHistoryPage((page) => Math.min(inventoryHistoryTotalPages, page + 1))}
+                                                        disabled={inventoryHistoryPage === inventoryHistoryTotalPages}
+                                                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        Next
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>

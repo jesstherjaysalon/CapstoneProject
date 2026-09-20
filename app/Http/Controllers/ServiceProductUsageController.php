@@ -12,7 +12,13 @@ class ServiceProductUsageController extends Controller
 {
     public function index(Request $request)
     {
-        $query = ServiceProductUsage::with(['product.inventoryCategory', 'jobOrder']);
+        $query = ServiceProductUsage::with([
+            'product.inventoryCategory',
+            'jobOrder.bookingService.service',
+            'jobOrder.bookingService.booking.profile.user',
+            'jobOrder.bookingService.booking.vehicle',
+            'jobOrder.profile.user',
+        ]);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -20,6 +26,10 @@ class ServiceProductUsageController extends Controller
 
         if ($request->has('job_order_id')) {
             $query->where('job_order_id', $request->job_order_id);
+        }
+
+        if ($request->has('product_id')) {
+            $query->where('product_id', $request->product_id);
         }
 
         $usages = $query->orderBy('created_at', 'desc')
@@ -47,7 +57,7 @@ class ServiceProductUsageController extends Controller
                 return response()->json(['message' => 'Product has no category assigned'], 422);
             }
 
-            if (!$product->inventoryCategory->deduct_on_service) {
+            if (!$product->inventoryCategory->deduct_on_service && !$product->inventoryCategory->is_asset) {
                 return response()->json(['message' => 'This product category cannot be requested for service'], 422);
             }
 

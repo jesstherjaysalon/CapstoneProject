@@ -189,17 +189,28 @@ class BookingController extends Controller
 
     public function store(Request $request)
     {
+        $user = Auth::user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
+        }
+
         $data = $request->validate([
             'services' => ['required', 'array', 'min:1'],
             'services.*' => ['integer'],
+            'vehicle_id' => ['nullable', 'integer', 'exists:vehicles,id'],
             'date' => ['required', 'date_format:Y-m-d'],
             'time' => ['nullable', 'date_format:H:i:s'],
             'total' => ['nullable', 'numeric'],
         ]);
 
-        $user = Auth::user();
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
+        if (!empty($data['vehicle_id'])) {
+            $vehicle = \App\Models\Vehicle::where('id', $data['vehicle_id'])
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$vehicle) {
+                return response()->json(['success' => false, 'message' => 'Selected vehicle does not belong to this customer'], 422);
+            }
         }
 
         $profile = $user->profile;
@@ -209,6 +220,7 @@ class BookingController extends Controller
 
         $booking = Booking::create([
             'profile_id' => $profile->id,
+            'vehicle_id' => $data['vehicle_id'] ?? null,
             'date' => $data['date'],
             'status' => 'pending',
             'rating' => null,
@@ -233,9 +245,15 @@ class BookingController extends Controller
 
     public function paymongo(Request $request)
     {
+        $user = Auth::user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
+        }
+
         $data = $request->validate([
             'services' => ['required', 'array', 'min:1'],
             'services.*' => ['integer'],
+            'vehicle_id' => ['nullable', 'integer', 'exists:vehicles,id'],
             'date' => ['required', 'date_format:Y-m-d'],
             'time' => ['nullable', 'date_format:H:i:s'],
             'total' => ['required', 'numeric', 'min:0'],
@@ -244,9 +262,14 @@ class BookingController extends Controller
             'payment_amount_type' => ['required', 'string', 'in:full,half'],
         ]);
 
-        $user = Auth::user();
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
+        if (!empty($data['vehicle_id'])) {
+            $vehicle = \App\Models\Vehicle::where('id', $data['vehicle_id'])
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$vehicle) {
+                return response()->json(['success' => false, 'message' => 'Selected vehicle does not belong to this customer'], 422);
+            }
         }
 
         $profile = $user->profile;
@@ -376,18 +399,29 @@ class BookingController extends Controller
 
     public function cash(Request $request)
     {
+        $user = Auth::user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
+        }
+
         $data = $request->validate([
             'services' => ['required', 'array', 'min:1'],
             'services.*' => ['integer'],
+            'vehicle_id' => ['nullable', 'integer', 'exists:vehicles,id'],
             'date' => ['required', 'date_format:Y-m-d'],
             'time' => ['nullable', 'date_format:H:i:s'],
             'total' => ['nullable', 'numeric'],
             'amount' => ['required', 'numeric', 'min:1'],
         ]);
 
-        $user = Auth::user();
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
+        if (!empty($data['vehicle_id'])) {
+            $vehicle = \App\Models\Vehicle::where('id', $data['vehicle_id'])
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$vehicle) {
+                return response()->json(['success' => false, 'message' => 'Selected vehicle does not belong to this customer'], 422);
+            }
         }
 
         $profile = $user->profile;
@@ -397,6 +431,7 @@ class BookingController extends Controller
 
         $booking = Booking::create([
             'profile_id' => $profile->id,
+            'vehicle_id' => $data['vehicle_id'] ?? null,
             'date' => $data['date'],
             'status' => 'pending',
             'rating' => null,

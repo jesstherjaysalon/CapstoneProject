@@ -20,6 +20,7 @@ class Booking extends Model
 
     protected $fillable = [
         'profile_id',
+        'vehicle_id',
         'date',
         'status',
         'rating',
@@ -29,6 +30,11 @@ class Booking extends Model
     public function profile()
     {
         return $this->belongsTo(Profile::class, 'profile_id');
+    }
+
+    public function vehicle()
+    {
+        return $this->belongsTo(Vehicle::class, 'vehicle_id');
     }
 
     public function services()
