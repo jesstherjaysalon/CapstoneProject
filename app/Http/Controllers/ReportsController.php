@@ -17,6 +17,87 @@ use App\Models\Service;
 
 class ReportsController extends Controller
 {
+    private function getBookingFinancialSummary(Booking $booking): array
+    {
+        $serviceCost = (float) $booking->services->sum(function ($service) {
+            return (float) ($service->service?->price ?? 0);
+        });
+
+        $jobOrderIds = $booking->services->pluck('id')->filter()->all();
+        $jobOrderIds = JobOrder::whereIn('booking_service_id', $jobOrderIds)->pluck('id');
+
+        $productCost = (float) ServiceProductUsage::with('product')
+            ->whereIn('job_order_id', $jobOrderIds)
+            ->where('status', 'Approved')
+            ->whereHas('product', function ($query) {
+                $query->whereNotNull('price')->where('price', '>', 0);
+            })
+            ->get()
+            ->sum(function ($usage) {
+                return ((float) ($usage->product->price ?? 0)) * (int) $usage->quantity_used;
+            });
+
+        $totalPaid = (float) $booking->payments()->where('status', 'paid')->sum('amount')
+            + (float) $booking->manualPayments()->sum('amount');
+
+        $totalCost = $serviceCost + $productCost;
+        $balance = $totalCost - $totalPaid;
+
+        return [
+            'service_cost' => $serviceCost,
+            'product_cost' => $productCost,
+            'total_cost' => $totalCost,
+            'total_paid' => $totalPaid,
+            'balance' => $balance,
+            'is_paid' => $balance <= 0,
+            'customer_name' => trim(sprintf('%s %s',
+                $booking->profile?->first_name ?? '',
+                $booking->profile?->last_name ?? ''
+            )),
+            'date' => $booking->date?->format('Y-m-d'),
+            'booking_id' => $booking->id,
+        ];
+    }
+
+    private function getPaidBookingRevenueSummary(Booking $booking): array
+    {
+        $serviceRevenue = (float) $booking->services->sum(function ($service) {
+            $servicePrice = (float) ($service->service?->price ?? 0);
+
+            return $servicePrice;
+        });
+
+        $paidServiceIds = $booking->services->pluck('id')->filter()->all();
+
+        $productRevenue = (float) ServiceProductUsage::with('product')
+            ->whereIn('job_order_id', JobOrder::whereIn('booking_service_id', $paidServiceIds)->pluck('id'))
+            ->where('status', 'Approved')
+            ->whereHas('product', function ($query) {
+                $query->whereNotNull('price')->where('price', '>', 0);
+            })
+            ->get()
+            ->sum(function ($usage) {
+                return ((float) ($usage->product->price ?? 0)) * (int) $usage->quantity_used;
+            });
+
+        $paidAmount = (float) $booking->payments()->where('status', 'paid')->sum('amount')
+            + (float) $booking->manualPayments()->sum('amount');
+
+        $actualPaidServiceRevenue = $paidAmount > 0 ? min($serviceRevenue, $paidAmount) : 0;
+        $actualPaidProductRevenue = $paidAmount > 0 ? max(0, $paidAmount - $actualPaidServiceRevenue) : 0;
+
+        if ($productRevenue > 0 && $actualPaidProductRevenue > 0) {
+            $actualPaidProductRevenue = min($productRevenue, $actualPaidProductRevenue);
+        }
+
+        return [
+            'service_revenue' => $actualPaidServiceRevenue,
+            'product_revenue' => $actualPaidProductRevenue,
+            'total_paid_revenue' => $actualPaidServiceRevenue + $actualPaidProductRevenue,
+            'balance' => max(0, $serviceRevenue + $productRevenue - $paidAmount),
+        ];
+    }
+
     public function index()
     {
         return inertia('Admin/Reports');
@@ -59,22 +140,58 @@ class ReportsController extends Controller
         $startDate = $request->get('start_date');
         $endDate = $request->get('end_date');
 
+        $bookings = Booking::with(['profile', 'services.service', 'payments', 'manualPayments'])
+            ->where('status', '!=', 'rejected')
+            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
+                return $query->whereBetween('date', [$startDate, $endDate]);
+            })
+            ->get();
+
+        $bookingSummaries = $bookings->map(function (Booking $booking) {
+            return $this->getBookingFinancialSummary($booking);
+        });
+
+        $paidBookings = $bookingSummaries->filter(fn ($summary) => $summary['is_paid'] && $summary['total_paid'] > 0)->values();
+        $paidRevenueSummaries = $bookings->map(function (Booking $booking) {
+            return $this->getPaidBookingRevenueSummary($booking);
+        })->filter(fn ($summary) => $summary['total_paid_revenue'] > 0);
+
+        $unpaidCustomers = $bookingSummaries->filter(fn ($summary) => !$summary['is_paid'] && $summary['total_cost'] > 0)
+            ->sortByDesc('balance')
+            ->values()
+            ->map(function ($summary) {
+                return [
+                    'booking_id' => $summary['booking_id'],
+                    'customer_name' => $summary['customer_name'] ?: 'Guest Customer',
+                    'date' => $summary['date'],
+                    'balance' => round((float) $summary['balance'], 2),
+                ];
+            });
+
+        $totalUnpaidBalance = (float) $unpaidCustomers->sum('balance');
+
+        $revenueByPaymentMethod = $paidBookings->flatMap(function ($summary) {
+            return [];
+        })->values();
+
         $revenueByPaymentMethod = Payment::where('status', 'paid')
             ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
                 return $query->whereBetween('created_at', [$startDate, $endDate]);
             })
+            ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
             ->selectRaw('payment_method, SUM(amount) as total, COUNT(*) as count')
             ->groupBy('payment_method')
             ->get();
 
-        // Add manual payments to revenue by payment method
         $manualPaymentTotal = ManualPayment::when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
                 return $query->whereBetween('created_at', [$startDate, $endDate]);
             })
+            ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
             ->sum('amount');
         $manualPaymentCount = ManualPayment::when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
                 return $query->whereBetween('created_at', [$startDate, $endDate]);
             })
+            ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
             ->count();
 
         if ($manualPaymentTotal > 0) {
@@ -85,98 +202,48 @@ class ReportsController extends Controller
             ]);
         }
 
-        \Log::info('Revenue by payment method:', $revenueByPaymentMethod->toArray());
-
         $revenueByAmountType = Payment::where('status', 'paid')
             ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
                 return $query->whereBetween('created_at', [$startDate, $endDate]);
             })
+            ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
             ->selectRaw('amount_type, SUM(amount) as total, COUNT(*) as count')
             ->groupBy('amount_type')
             ->get();
 
         $paymentStatus = Payment::selectRaw('status, COUNT(*) as count, SUM(amount) as total')
+            ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
             ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
                 return $query->whereBetween('created_at', [$startDate, $endDate]);
             })
             ->groupBy('status')
             ->get();
 
-        // Add manual payments as "paid" status
         $paymentStatus->push((object) [
             'status' => 'manual',
             'count' => $manualPaymentCount,
             'total' => $manualPaymentTotal,
         ]);
 
-        // Get online payments daily service revenue
-        $onlineDailyRevenue = Payment::where('status', 'paid')
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('created_at', [$startDate, $endDate]);
+        $dailyRevenue = $paidRevenueSummaries
+            ->groupBy(fn ($summary, $index) => $bookings->get($index)?->date?->format('Y-m-d'))
+            ->map(function ($summaryGroup, $date) {
+                $serviceTotal = (float) $summaryGroup->sum('service_revenue');
+                $productTotal = (float) $summaryGroup->sum('product_revenue');
+
+                return (object) [
+                    'date' => $date,
+                    'service_total' => $serviceTotal,
+                    'product_total' => $productTotal,
+                    'total' => $serviceTotal + $productTotal,
+                ];
             })
-            ->selectRaw('DATE(created_at) as date, SUM(amount) as total')
-            ->groupBy('date')
-            ->get()
-            ->keyBy('date');
+            ->sortBy('date')
+            ->values();
 
-        // Get manual payments daily service revenue
-        $manualDailyRevenue = ManualPayment::when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('created_at', [$startDate, $endDate]);
-            })
-            ->selectRaw('DATE(created_at) as date, SUM(amount) as total')
-            ->groupBy('date')
-            ->get()
-            ->keyBy('date');
-
-        // Get product sales daily revenue from approved consumable product usage
-        $productDailyRevenue = DB::table('service_product_usage as spu')
-            ->join('products as p', 'spu.product_id', '=', 'p.id')
-            ->where('spu.status', 'Approved')
-            ->whereNotNull('p.price')
-            ->where('p.price', '>', 0)
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('spu.created_at', [$startDate, $endDate]);
-            })
-            ->selectRaw('DATE(spu.created_at) as date, SUM(p.price * spu.quantity_used) as total')
-            ->groupBy('date')
-            ->get()
-            ->keyBy('date');
-
-        // Merge daily revenues including product sales and service revenue separately
-        $allDates = $onlineDailyRevenue->keys()->merge($manualDailyRevenue->keys())->merge($productDailyRevenue->keys())->unique()->sort();
-        $dailyRevenue = $allDates->map(function ($date) use ($onlineDailyRevenue, $manualDailyRevenue, $productDailyRevenue) {
-            $serviceTotal = ($onlineDailyRevenue->get($date)?->total ?? 0) + ($manualDailyRevenue->get($date)?->total ?? 0);
-            $productTotal = $productDailyRevenue->get($date)?->total ?? 0;
-            return (object) [
-                'date' => $date,
-                'service_total' => $serviceTotal,
-                'product_total' => $productTotal,
-                'total' => $serviceTotal + $productTotal,
-            ];
-        })->values();
-
-        // Calculate total daily revenue
-        $totalDailyRevenue = $dailyRevenue->sum('total');
-
-        // Calculate total consumable product sales
-        $totalProductSales = ServiceProductUsage::with('product')
-            ->where('status', 'Approved')
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('created_at', [$startDate, $endDate]);
-            })
-            ->whereHas('product', function ($query) {
-                $query->whereNotNull('price')->where('price', '>', 0);
-            })
-            ->get()
-            ->sum(function ($usage) {
-                return ($usage->product->price ?? 0) * $usage->quantity_used;
-            });
-
-        \Log::info('Total Daily Revenue:', ['total' => $totalDailyRevenue]);
-        \Log::info('Total Product Sales:', ['total' => $totalProductSales]);
-
-        // Calculate total revenue by service (will be fetched from revenueByService endpoint)
-        $totalRevenueByService = 0; // This will be calculated separately
+        $totalProductSales = (float) $paidRevenueSummaries->sum('product_revenue');
+        $totalRevenueByService = (float) $paidRevenueSummaries->sum('service_revenue');
+        $totalDailyRevenue = $totalProductSales + $totalRevenueByService;
 
         $response = [
             'revenue_by_payment_method' => $revenueByPaymentMethod,
@@ -185,9 +252,10 @@ class ReportsController extends Controller
             'daily_revenue' => $dailyRevenue,
             'total_daily_revenue' => $totalDailyRevenue,
             'total_product_sales' => $totalProductSales,
+            'total_revenue_by_service' => $totalRevenueByService,
+            'total_unpaid_balance' => $totalUnpaidBalance,
+            'unpaid_customers' => $unpaidCustomers,
         ];
-
-        \Log::info('Financial response:', $response);
 
         return response()->json($response);
     }
@@ -197,37 +265,53 @@ class ReportsController extends Controller
         $startDate = $request->get('start_date') ?? now()->startOfMonth();
         $endDate = $request->get('end_date') ?? now()->endOfMonth();
 
-        // Revenue from online payments
+        $paidBookingIds = Booking::with(['services.service', 'payments', 'manualPayments'])
+            ->where('status', '!=', 'rejected')
+            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
+                return $query->whereBetween('date', [$startDate, $endDate]);
+            })
+            ->get()
+            ->filter(function (Booking $booking) {
+                $summary = $this->getBookingFinancialSummary($booking);
+                return $summary['is_paid'] && $summary['total_paid'] > 0;
+            })
+            ->pluck('id')
+            ->all();
+
         $onlineRevenue = DB::table('booking_services')
             ->join('services', 'booking_services.service_id', '=', 'services.id')
             ->join('bookings', 'booking_services.booking_id', '=', 'bookings.id')
             ->join('payments', 'bookings.id', '=', 'payments.booking_id')
+            ->whereIn('bookings.id', $paidBookingIds)
             ->where('payments.status', 'paid')
-            ->whereBetween('payments.created_at', [$startDate, $endDate])
+            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
+                return $query->whereBetween('payments.created_at', [$startDate, $endDate]);
+            })
             ->selectRaw('services.id, services.name, services.price, COUNT(DISTINCT bookings.id) as booking_count, SUM(services.price) as total_revenue')
             ->groupBy('services.id', 'services.name', 'services.price')
             ->get()
             ->keyBy('id');
 
-        // Revenue from manual payments
         $manualRevenue = DB::table('booking_services')
             ->join('services', 'booking_services.service_id', '=', 'services.id')
             ->join('bookings', 'booking_services.booking_id', '=', 'bookings.id')
             ->join('manual_payments', 'bookings.id', '=', 'manual_payments.booking_id')
-            ->whereBetween('manual_payments.created_at', [$startDate, $endDate])
+            ->whereIn('bookings.id', $paidBookingIds)
+            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
+                return $query->whereBetween('manual_payments.created_at', [$startDate, $endDate]);
+            })
             ->selectRaw('services.id, services.name, services.price, COUNT(DISTINCT bookings.id) as booking_count, SUM(services.price) as total_revenue')
             ->groupBy('services.id', 'services.name', 'services.price')
             ->get()
             ->keyBy('id');
 
-        // Merge revenues
         $allServiceIds = $onlineRevenue->keys()->merge($manualRevenue->keys())->unique();
         $revenue = $allServiceIds->map(function ($serviceId) use ($onlineRevenue, $manualRevenue) {
             $online = $onlineRevenue->get($serviceId);
             $manual = $manualRevenue->get($serviceId);
 
             $bookingCount = ($online?->booking_count ?? 0) + ($manual?->booking_count ?? 0);
-            $totalRevenue = ($online?->total_revenue ?? 0) + ($manual?->total_revenue ?? 0);
+            $totalRevenue = ((float) ($online?->total_revenue ?? 0)) + ((float) ($manual?->total_revenue ?? 0));
 
             return (object) [
                 'id' => $serviceId,
@@ -238,10 +322,7 @@ class ReportsController extends Controller
             ];
         })->values();
 
-        // Calculate total revenue by service
-        $totalRevenueByService = $revenue->sum('total_revenue');
-
-        \Log::info('Total Revenue by Service:', ['total' => $totalRevenueByService]);
+        $totalRevenueByService = (float) $revenue->sum('total_revenue');
 
         return response()->json([
             'revenue' => $revenue,
@@ -254,6 +335,19 @@ class ReportsController extends Controller
         $startDate = $request->get('start_date');
         $endDate = $request->get('end_date');
 
+        $paidBookingIds = Booking::with(['services.service', 'payments', 'manualPayments'])
+            ->where('status', '!=', 'rejected')
+            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
+                return $query->whereBetween('date', [$startDate, $endDate]);
+            })
+            ->get()
+            ->filter(function (Booking $booking) {
+                $summary = $this->getBookingFinancialSummary($booking);
+                return $summary['is_paid'] && $summary['total_paid'] > 0;
+            })
+            ->pluck('id')
+            ->all();
+
         $productSales = DB::table('service_product_usage as spu')
             ->join('products as p', 'spu.product_id', '=', 'p.id')
             ->join('job_orders as jo', 'spu.job_order_id', '=', 'jo.id')
@@ -265,6 +359,7 @@ class ReportsController extends Controller
             ->leftJoin('users as staff_user', 'staff_profile.user_id', '=', 'staff_user.id')
             ->leftJoin('services as s', 'bs.service_id', '=', 's.id')
             ->where('spu.status', 'Approved')
+            ->whereIn('b.id', $paidBookingIds)
             ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
                 return $query->whereBetween('spu.created_at', [$startDate, $endDate]);
             })
@@ -294,19 +389,46 @@ class ReportsController extends Controller
         $startDate = $request->get('start_date') ?? now()->startOfMonth();
         $endDate = $request->get('end_date') ?? now()->endOfMonth();
 
-        $bookingStatus = Booking::whereBetween('created_at', [$startDate, $endDate])
+        $bookingStatus = Booking::where('status', '!=', 'rejected')
+            ->whereBetween('created_at', [$startDate, $endDate])
             ->selectRaw('status, COUNT(*) as count')
             ->groupBy('status')
             ->get();
 
-        $dailyBookings = Booking::whereBetween('date', [$startDate, $endDate])
+        $dailyBookings = Booking::where('status', '!=', 'rejected')
+            ->whereBetween('date', [$startDate, $endDate])
             ->selectRaw('date, COUNT(*) as count')
             ->groupBy('date')
             ->orderBy('date')
             ->get();
 
+        $paidBookings = Booking::with(['profile.user', 'payments', 'manualPayments'])
+            ->where('status', '!=', 'rejected')
+            ->whereBetween('date', [$startDate, $endDate])
+            ->get()
+            ->map(function (Booking $booking) {
+                $totalPaid = (float) $booking->payments()->where('status', 'paid')->sum('amount')
+                    + (float) $booking->manualPayments()->sum('amount');
+
+                return [
+                    'booking_id' => $booking->id,
+                    'customer_name' => trim(sprintf('%s %s',
+                        $booking->profile?->first_name ?? '',
+                        $booking->profile?->last_name ?? ''
+                    )) ?: 'Guest Customer',
+                    'date' => $booking->date?->format('Y-m-d'),
+                    'status' => $booking->status,
+                    'amount_paid' => round($totalPaid, 2),
+                ];
+            })
+            ->filter(fn ($booking) => $booking['amount_paid'] > 0)
+            ->values();
+
         $servicePopularity = DB::table('booking_services')
             ->join('services', 'booking_services.service_id', '=', 'services.id')
+            ->join('bookings', 'booking_services.booking_id', '=', 'bookings.id')
+            ->where('bookings.status', '!=', 'rejected')
+            ->whereBetween('bookings.date', [$startDate, $endDate])
             ->selectRaw('services.name, COUNT(*) as booking_count')
             ->groupBy('services.id', 'services.name')
             ->orderByDesc('booking_count')
@@ -314,14 +436,18 @@ class ReportsController extends Controller
             ->get();
 
         $averageRating = DB::table('booking_services')
-            ->whereNotNull('rating')
-            ->whereBetween('created_at', [$startDate, $endDate])
-            ->avg('rating');
+            ->join('bookings', 'booking_services.booking_id', '=', 'bookings.id')
+            ->where('bookings.status', '!=', 'rejected')
+            ->whereNotNull('booking_services.rating')
+            ->whereBetween('bookings.date', [$startDate, $endDate])
+            ->avg('booking_services.rating');
 
         $dailyRatings = DB::table('booking_services')
-            ->whereNotNull('rating')
-            ->whereBetween('created_at', [$startDate, $endDate])
-            ->selectRaw('DATE(created_at) as date, AVG(rating) as avg_rating')
+            ->join('bookings', 'booking_services.booking_id', '=', 'bookings.id')
+            ->where('bookings.status', '!=', 'rejected')
+            ->whereNotNull('booking_services.rating')
+            ->whereBetween('bookings.date', [$startDate, $endDate])
+            ->selectRaw('DATE(bookings.date) as date, AVG(booking_services.rating) as avg_rating')
             ->groupBy('date')
             ->orderBy('date')
             ->get();
@@ -329,6 +455,7 @@ class ReportsController extends Controller
         return response()->json([
             'booking_status' => $bookingStatus,
             'daily_bookings' => $dailyBookings,
+            'paid_bookings' => $paidBookings,
             'service_popularity' => $servicePopularity,
             'average_rating' => $averageRating ?? 0,
             'daily_ratings' => $dailyRatings,

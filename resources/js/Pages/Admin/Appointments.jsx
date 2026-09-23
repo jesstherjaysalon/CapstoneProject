@@ -153,19 +153,29 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
             header: 'Payment',
             cell: (info) => {
                 const payment = info.getValue();
+                const balance = Number(payment?.balance || 0);
                 const hasOnlinePayment = payment && payment.payments && payment.payments.length > 0 && payment.payments.some(p => p.status === 'paid');
                 const hasManualPayment = payment && payment.manual_payments && payment.manual_payments.length > 0;
 
-                if (hasOnlinePayment || hasManualPayment) {
+                if (balance > 0) {
                     return (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-                            <DollarSign size={14} /> Paid
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                            Unpaid
                         </span>
                     );
                 }
+
+                if (hasOnlinePayment || hasManualPayment) {
+                    return (
+                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                            Paid
+                        </span>
+                    );
+                }
+
                 return (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                        <AlertCircle size={14} /> No Payment
+                    <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                        No Payment
                     </span>
                 );
             },

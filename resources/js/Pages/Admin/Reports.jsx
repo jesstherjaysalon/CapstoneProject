@@ -362,7 +362,7 @@ export default function Reports() {
 
                         {data.financial && (
                             <>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                     <StatCard
                                         title="Total Daily Revenue"
                                         value={`₱${data.financial.total_daily_revenue?.toLocaleString() || 0}`}
@@ -377,10 +377,52 @@ export default function Reports() {
                                     />
                                     <StatCard
                                         title="Total Revenue by Service"
-                                        value={`₱${data.revenueByService?.total_revenue_by_service?.toLocaleString() || 0}`}
+                                        value={`₱${Number(data.financial.total_revenue_by_service || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                                         icon={ClipboardList}
                                         color="purple"
                                     />
+                                    <StatCard
+                                        title="Total Unpaid Balance"
+                                        value={`₱${Number(data.financial.total_unpaid_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                        icon={AlertTriangle}
+                                        color="red"
+                                    />
+                                </div>
+
+                                <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                                    <div className="mb-4">
+                                        <h3 className="text-lg font-semibold text-gray-900">Customers with Balance</h3>
+                                        <p className="text-sm text-gray-500">Customers whose bookings still have remaining unpaid balances.</p>
+                                    </div>
+
+                                    {Array.isArray(data.financial.unpaid_customers) && data.financial.unpaid_customers.length > 0 ? (
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left text-sm">
+                                                <thead>
+                                                    <tr className="border-b border-gray-200 bg-gray-50">
+                                                        <th className="px-4 py-3 font-semibold text-gray-700">Customer</th>
+                                                        <th className="px-4 py-3 font-semibold text-gray-700">Booking ID</th>
+                                                        <th className="px-4 py-3 font-semibold text-gray-700">Date</th>
+                                                        <th className="px-4 py-3 font-semibold text-gray-700">Balance</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {data.financial.unpaid_customers.map((customer, index) => (
+                                                        <tr key={`${customer.customer_name}-${customer.booking_id || index}`} className="border-b border-gray-100">
+                                                            <td className="px-4 py-3 font-medium text-gray-800">{customer.customer_name}</td>
+                                                            <td className="px-4 py-3 text-gray-700">#{customer.booking_id}</td>
+                                                            <td className="px-4 py-3 text-gray-700">{customer.date}</td>
+                                                            <td className="px-4 py-3 font-semibold text-amber-700">₱{Number(customer.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-8 text-gray-500">
+                                            No customers currently have an unpaid balance.
+                                        </div>
+                                    )}
                                 </div>
 
                                 <ChartCard title="Daily Revenue Trend: Service Revenue vs Product Sales">
@@ -685,6 +727,48 @@ export default function Reports() {
                                 </div>
                             )}
                         </ChartCard>
+
+                        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                            <div className="mb-4">
+                                <h3 className="text-lg font-semibold text-gray-900">Paid Booking Report</h3>
+                                <p className="text-sm text-gray-500">Detailed record of paid bookings only, excluding rejected bookings.</p>
+                            </div>
+
+                            {Array.isArray(data.bookings.paid_bookings) && data.bookings.paid_bookings.length > 0 ? (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left text-sm">
+                                        <thead>
+                                            <tr className="border-b border-gray-200 bg-gray-50">
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Booking ID</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Customer</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Booking Date</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Status</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Amount Paid</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {data.bookings.paid_bookings.map((booking, index) => (
+                                                <tr key={`${booking.booking_id || index}`} className="border-b border-gray-100">
+                                                    <td className="px-4 py-3 font-medium text-gray-800">#{booking.booking_id}</td>
+                                                    <td className="px-4 py-3 text-gray-700">{booking.customer_name}</td>
+                                                    <td className="px-4 py-3 text-gray-700">{booking.date}</td>
+                                                    <td className="px-4 py-3">
+                                                        <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800 capitalize">
+                                                            {booking.status}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3 font-semibold text-gray-800">₱{Number(booking.amount_paid || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-8 text-gray-500">
+                                    No paid bookings found for this date range.
+                                </div>
+                            )}
+                        </div>
 
                         <ChartCard title="Average Rating Trend">
                             {data.bookings.daily_ratings?.length > 0 ? (
