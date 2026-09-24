@@ -42,13 +42,10 @@ class StaffRegistrationController extends Controller
 
         $user->profile()->create($request->validated());
 
-        $faceUrl = URL::temporarySignedRoute(
-            'staff.face.register',
-            now()->addHours(24),
-            ['user' => $user->id]
-        );
+        $user->update(['status' => User::STATUS_ACTIVE]);
+        Auth::login($user);
 
-        return redirect($faceUrl);
+        return redirect()->route('staff.dashboard')->with('success', 'Profile complete. Your account is now active.');
     }
 
     public function showFaceRegistration(User $user): Response

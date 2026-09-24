@@ -29,7 +29,7 @@ export default function CreateProfile({ staff, storeUrl }) {
                                     Complete your profile
                                 </h1>
                                 <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600 sm:text-base">
-                                    Share your details to finalize the onboarding process before face registration. This keeps your team experience polished and secure.
+                                    Share your details to finalize your onboarding. Face registration can be completed later if needed.
                                 </p>
                             </div>
 
@@ -40,7 +40,7 @@ export default function CreateProfile({ staff, storeUrl }) {
                                     </div>
                                     <div>
                                         <p className="font-semibold text-slate-950">Profile details</p>
-                                        <p className="text-sm text-slate-500">One refined step to complete your account.</p>
+                                        <p className="text-sm text-slate-500">Complete your account and continue to the dashboard.</p>
                                     </div>
                                 </div>
                                 <div className="mt-6 space-y-3 rounded-3xl bg-slate-100 p-4 text-slate-600">
@@ -146,7 +146,7 @@ export default function CreateProfile({ staff, storeUrl }) {
                                         disabled={form.processing}
                                         className="inline-flex items-center justify-center rounded-[24px] bg-slate-950 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/10 transition duration-200 hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-950/20 disabled:cursor-not-allowed disabled:opacity-60"
                                     >
-                                        Next step
+                                        Complete profile
                                     </button>
                                 </div>
                             </div>

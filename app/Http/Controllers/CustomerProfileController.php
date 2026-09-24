@@ -66,16 +66,12 @@ class CustomerProfileController extends Controller
                 $validated
             );
 
-            $faceUrl = URL::temporarySignedRoute(
-                'customer.face.register',
-                now()->addHours(24),
-                ['user' => $user->id]
-            );
+            $user->update(['status' => User::STATUS_ACTIVE]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Profile saved successfully. Please proceed to face registration.',
-                'face_url' => $faceUrl,
+                'message' => 'Profile saved successfully. You can now log in to your account.',
+                'redirect_url' => route('login'),
             ], 200);
         } catch (\Exception $e) {
             return response()->json([

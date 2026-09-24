@@ -44,11 +44,7 @@ export default function CompleteProfile({ user }) {
             if (response.ok && data.success) {
                 setSuccess(data.message);
                 setTimeout(() => {
-                    if (data.face_url) {
-                        window.location.href = data.face_url;
-                    } else {
-                        window.location.href = window.location.href.replace('/profile/complete/', '/face/register/');
-                    }
+                    window.location.href = data.redirect_url || '/login';
                 }, 1500);
             } else {
                 setError(data.message || 'Failed to save profile');
@@ -255,10 +251,10 @@ export default function CompleteProfile({ user }) {
                                 </div>
                             </div>
                             <div style={stepItem} className="step-item">
-                                <div style={{...stepNumber, ...stepNumberActive}} className="step-number step-number-active step-number-responsive">2</div>
+                                <div style={stepNumber} className="step-number step-number-responsive">2</div>
                                 <div style={stepContent} className="step-content">
-                                    <h3 style={stepTitle} className="step-title step-title-responsive">Face Registration</h3>
-                                    <p style={stepDescription} className="step-description step-description-responsive">Register your face for secure access</p>
+                                    <h3 style={stepTitle} className="step-title step-title-responsive">Optional face registration</h3>
+                                    <p style={stepDescription} className="step-description step-description-responsive">Add face verification later if needed</p>
                                 </div>
                             </div>
                             <div style={stepItem} className="step-item">
@@ -385,7 +381,7 @@ export default function CompleteProfile({ user }) {
                                             </svg>
                                             Saving...
                                         </span>
-                                    ) : 'Continue to Face Registration'}
+                                    ) : 'Complete Profile'}
                                 </button>
                             </form>
                         </div>

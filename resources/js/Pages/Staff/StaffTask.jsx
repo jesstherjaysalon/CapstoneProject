@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Head, usePage, router } from '@inertiajs/react';
 import StaffLayout from '@/Layouts/StaffLayout';
 import { CheckCircle, Clock, ClipboardList, Search, PlayCircle, Calendar, User, Check, Package, Plus, X, Eye, RotateCcw, Camera, Upload, Image as ImageIcon } from 'lucide-react';
@@ -29,10 +29,56 @@ export default function StaffTask({ auth, jobOrders, products }) {
     });
     const [capturedImage, setCapturedImage] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
+    const [isCameraOpen, setIsCameraOpen] = useState(false);
+    const [cameraError, setCameraError] = useState('');
     const [toast, setToast] = useState(null);
     const [isBlockedModalOpen, setIsBlockedModalOpen] = useState(false);
     const [blockedMessage, setBlockedMessage] = useState('');
     const fileInputRef = useRef(null);
+    const videoRef = useRef(null);
+    const cameraStreamRef = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!isCameraOpen) return undefined;
+
+        let cancelled = false;
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+            setCameraError('Camera access is not supported by this browser. Please select a photo instead.');
+            return undefined;
+        }
+
+        navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' } },
+            audio: false,
+        }).then((stream) => {
+            if (cancelled) {
+                stream.getTracks().forEach((track) => track.stop());
+                return;
+            }
+
+            cameraStreamRef.current = stream;
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+            }
+        }).catch((error) => {
+            if (cancelled) return;
+            console.error('Camera access failed:', error);
+            setCameraError('Camera permission was denied or the camera is unavailable. Please allow camera access or select a photo instead.');
+        });
+
+        return () => {
+            cancelled = true;
+            cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+            cameraStreamRef.current = null;
+        };
+    }, [isCameraOpen]);
 
     const filteredJobOrders = useMemo(() => {
         const query = search.trim().toLowerCase();
@@ -181,7 +227,30 @@ export default function StaffTask({ auth, jobOrders, products }) {
     };
 
     const handleCameraCapture = () => {
-        fileInputRef.current.click();
+        setCameraError('');
+        setIsCameraOpen(true);
+    };
+
+    const closeCamera = () => {
+        cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+        setIsCameraOpen(false);
+        setCameraError('');
+    };
+
+    const captureFromCamera = () => {
+        const video = videoRef.current;
+        if (!video || !video.videoWidth || !video.videoHeight) {
+            setCameraError('The camera is not ready yet. Please try again.');
+            return;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        setCapturedImage(canvas.toDataURL('image/jpeg', 0.9));
+        closeCamera();
     };
 
     const handleUploadImage = async () => {
@@ -781,17 +850,23 @@ export default function StaffTask({ auth, jobOrders, products }) {
                                         ref={fileInputRef}
                                         onChange={handleFileSelect}
                                         accept="image/*"
-                                        capture="environment"
                                         className="hidden"
                                     />
 
                                     <div className="flex gap-3">
                                         <button
+                                            onClick={() => fileInputRef.current?.click()}
+                                            className="flex-1 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200 transition flex items-center justify-center gap-2"
+                                        >
+                                            <ImageIcon size={18} />
+                                            <span>Select from photos</span>
+                                        </button>
+                                        <button
                                             onClick={handleCameraCapture}
                                             className="flex-1 rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 transition flex items-center justify-center gap-2"
                                         >
                                             <Camera size={18} />
-                                            <span>Take Photo</span>
+                                            <span>Use camera</span>
                                         </button>
                                         {capturedImage && (
                                             <button
@@ -827,6 +902,56 @@ export default function StaffTask({ auth, jobOrders, products }) {
                                         A photo is required before marking the task as completed.
                                     </p>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {isCameraOpen && (
+                    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 p-4">
+                        <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-xl font-semibold text-slate-900">Take completion photo</h2>
+                                <button
+                                    onClick={closeCamera}
+                                    className="rounded-full p-2 text-slate-500 hover:bg-slate-100 transition"
+                                    aria-label="Close camera"
+                                >
+                                    <X size={24} />
+                                </button>
+                            </div>
+
+                            <div className="mt-4 overflow-hidden rounded-2xl bg-slate-950">
+                                <video
+                                    ref={videoRef}
+                                    autoPlay
+                                    playsInline
+                                    muted
+                                    className="aspect-video w-full object-cover"
+                                />
+                            </div>
+
+                            {cameraError && (
+                                <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                                    {cameraError}
+                                </p>
+                            )}
+
+                            <div className="mt-4 flex justify-end gap-3">
+                                <button
+                                    onClick={closeCamera}
+                                    className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-200 transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={captureFromCamera}
+                                    disabled={Boolean(cameraError)}
+                                    className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 transition disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    <Camera size={18} />
+                                    Capture photo
+                                </button>
                             </div>
                         </div>
                     </div>

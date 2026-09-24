@@ -359,6 +359,7 @@ class BookingController extends Controller
 
         $booking = Booking::create([
             'profile_id' => $profile->id,
+            'vehicle_id' => $data['vehicle_id'] ?? null,
             'date' => $data['date'],
             'status' => 'pending',
             'rating' => null,
