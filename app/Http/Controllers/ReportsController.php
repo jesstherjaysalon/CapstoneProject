@@ -501,12 +501,50 @@ class ReportsController extends Controller
             ->orderByDesc('avg_rating')
             ->get();
 
+        $jobOrderHistory = JobOrder::with([
+            'bookingService.service',
+            'bookingService.booking.profile',
+            'bookingService.booking.vehicle',
+            'profile',
+        ])
+            ->latest()
+            ->get()
+            ->map(function (JobOrder $jobOrder) {
+                $booking = $jobOrder->bookingService?->booking;
+                $vehicle = $booking?->vehicle;
+                $customer = $booking?->profile;
+                $staff = $jobOrder->profile;
+
+                return [
+                    'id' => $jobOrder->id,
+                    'booking_id' => $booking?->id,
+                    'service_name' => $jobOrder->bookingService?->service?->name,
+                    'customer_name' => $customer
+                        ? trim(($customer->first_name ?? '').' '.($customer->last_name ?? ''))
+                        : null,
+                    'vehicle' => $vehicle ? [
+                        'brand' => $vehicle->brand,
+                        'model' => $vehicle->model,
+                        'plate_number' => $vehicle->plate_number,
+                    ] : null,
+                    'staff_name' => $staff
+                        ? trim(($staff->first_name ?? '').' '.($staff->last_name ?? ''))
+                        : null,
+                    'booking_date' => $booking?->date?->format('Y-m-d'),
+                    'start_time' => $jobOrder->start_time?->toISOString(),
+                    'end_time' => $jobOrder->end_time?->toISOString(),
+                    'status' => $jobOrder->status,
+                ];
+            })
+            ->values();
+
         return response()->json([
             'job_order_status' => $jobOrderStatus,
             'average_duration' => $averageDuration->avg_minutes ?? 0,
             'completed_job_orders' => $completedJobOrders,
             'daily_completed_job_orders' => $dailyCompletedJobOrders,
             'staff_ratings' => $staffRatings,
+            'job_order_history' => $jobOrderHistory,
         ]);
     }
 

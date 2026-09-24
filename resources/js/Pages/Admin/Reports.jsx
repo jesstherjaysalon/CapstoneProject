@@ -898,6 +898,58 @@ export default function Reports() {
                                 </div>
                             )}
                         </ChartCard>
+
+                        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                            <div className="mb-4">
+                                <h3 className="text-lg font-semibold text-gray-900">Job Order History</h3>
+                                <p className="text-sm text-gray-500">Complete job order history, including the vehicle booked for each service.</p>
+                            </div>
+
+                            {data.jobOrders.job_order_history?.length > 0 ? (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full min-w-[900px] text-left text-sm">
+                                        <thead>
+                                            <tr className="border-b border-gray-200 bg-gray-50">
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Job Order</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Booking</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Service</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Customer</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Vehicle</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Staff</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Date</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {data.jobOrders.job_order_history.map((jobOrder) => (
+                                                <tr key={jobOrder.id} className="border-b border-gray-100">
+                                                    <td className="px-4 py-3 font-medium text-gray-800">#{jobOrder.id}</td>
+                                                    <td className="px-4 py-3 text-gray-700">{jobOrder.booking_id ? `#${jobOrder.booking_id}` : '-'}</td>
+                                                    <td className="px-4 py-3 text-gray-700">{jobOrder.service_name || 'Unknown service'}</td>
+                                                    <td className="px-4 py-3 text-gray-700">{jobOrder.customer_name || 'Unknown customer'}</td>
+                                                    <td className="px-4 py-3 text-gray-700">
+                                                        {jobOrder.vehicle
+                                                            ? `${jobOrder.vehicle.brand || ''} ${jobOrder.vehicle.model || ''} • ${jobOrder.vehicle.plate_number || 'No plate'}`.trim()
+                                                            : 'No vehicle'}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-gray-700">{jobOrder.staff_name || 'Unassigned'}</td>
+                                                    <td className="px-4 py-3 text-gray-700">{jobOrder.booking_date || '-'}</td>
+                                                    <td className="px-4 py-3">
+                                                        <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-700 capitalize">
+                                                            {jobOrder.status?.replace('_', ' ') || 'Unknown'}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-8 text-gray-500">
+                                    No job order history found.
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
 
