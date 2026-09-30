@@ -462,10 +462,12 @@ class ReportsController extends Controller
             ->whereBetween('created_at', [$startDate, $endDate])
             ->count();
 
-        $dailyCompletedJobOrders = JobOrder::where('status', 'completed')
-            ->whereBetween('created_at', [$startDate, $endDate])
-            ->selectRaw('DATE(created_at) as date, COUNT(*) as count')
-            ->groupBy('date')
+        $dailyCompletedJobOrders = JobOrder::join('booking_services', 'job_orders.booking_service_id', '=', 'booking_services.id')
+            ->join('bookings', 'booking_services.booking_id', '=', 'bookings.id')
+            ->where('job_orders.status', 'completed')
+            ->whereBetween('bookings.date', [$startDate, $endDate])
+            ->selectRaw('DATE(bookings.date) as date, COUNT(job_orders.id) as count')
+            ->groupByRaw('DATE(bookings.date)')
             ->orderBy('date')
             ->get();
 

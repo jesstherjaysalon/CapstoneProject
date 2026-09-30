@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, ReferenceDot } from 'recharts';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Banknote, Calendar, Package, Users, ClipboardList, TrendingUp, AlertTriangle, Star, RefreshCw } from 'lucide-react';
 
 const COLORS = ['#0D2A94', '#3B82F6', '#10B981', '#F59E0B', '#EF4444'];
@@ -46,9 +46,7 @@ export default function Reports() {
     const [data, setData] = useState({
         overview: null,
         financial: null,
-        revenueByService: null,
         consumableProductSales: null,
-        bookings: null,
         jobOrders: null,
         inventory: null,
         customers: null,
@@ -109,10 +107,6 @@ export default function Reports() {
         await requestReport('financial', buildDateRangeUrl('/admin/reports/financial', startDate, endDate));
     };
 
-    const fetchRevenueByService = async (startDate = financialStartDate, endDate = financialEndDate) => {
-        await requestReport('revenueByService', buildDateRangeUrl('/admin/reports/revenue-by-service', startDate, endDate));
-    };
-
     const fetchConsumableProductSales = async (startDate = financialStartDate, endDate = financialEndDate) => {
         await requestReport('consumableProductSales', buildDateRangeUrl('/admin/reports/consumable-product-sales', startDate, endDate));
     };
@@ -128,7 +122,6 @@ export default function Reports() {
         }
         setFilterError('');
         fetchFinancialData(financialStartDate, financialEndDate);
-        fetchRevenueByService(financialStartDate, financialEndDate);
         fetchConsumableProductSales(financialStartDate, financialEndDate);
     };
 
@@ -137,12 +130,7 @@ export default function Reports() {
         setFinancialEndDate('');
         setFilterError('');
         fetchFinancialData('', '');
-        fetchRevenueByService('', '');
         fetchConsumableProductSales('', '');
-    };
-
-    const fetchBookingsData = async () => {
-        await requestReport('bookings', '/admin/reports/bookings');
     };
 
     const fetchJobOrdersData = async () => {
@@ -166,11 +154,7 @@ export default function Reports() {
         switch (tab) {
             case 'financial':
                 fetchFinancialData(financialStartDate, financialEndDate);
-                fetchRevenueByService(financialStartDate, financialEndDate);
                 fetchConsumableProductSales(financialStartDate, financialEndDate);
-                break;
-            case 'bookings':
-                if (!data.bookings) fetchBookingsData();
                 break;
             case 'jobOrders':
                 if (!data.jobOrders) fetchJobOrdersData();
@@ -190,14 +174,13 @@ export default function Reports() {
     const tabs = [
         { id: 'overview', label: 'Overview', icon: TrendingUp },
         { id: 'financial', label: 'Financial', icon: Banknote },
-        { id: 'bookings', label: 'Bookings', icon: Calendar },
         { id: 'jobOrders', label: 'Job Orders', icon: ClipboardList },
         { id: 'inventory', label: 'Inventory', icon: Package },
         { id: 'customers', label: 'Customers', icon: Users },
         { id: 'staff', label: 'Staff', icon: Users },
     ];
     const activeRequestKeys = activeTab === 'financial'
-        ? ['financial', 'revenueByService', 'consumableProductSales']
+        ? ['financial', 'consumableProductSales']
         : [activeTab];
     const activeDataKey = activeTab === 'jobOrders' ? 'jobOrders' : activeTab;
     const activeLoading = activeRequestKeys.some(key => loadingSections[key]);
@@ -491,37 +474,6 @@ export default function Reports() {
                                     </ChartCard>
                                 </div>
 
-                                {Array.isArray(data.revenueByService?.revenue) && data.revenueByService.revenue?.length > 0 ? (
-                                    <ChartCard title="Revenue by Service">
-                                        <ResponsiveContainer width="100%" height={400}>
-                                            <PieChart>
-                                                <Pie
-                                                    data={data.revenueByService.revenue}
-                                                    cx="50%"
-                                                    cy="50%"
-                                                    labelLine={false}
-                                                    outerRadius={120}
-                                                    dataKey="total_revenue"
-                                                    nameKey="name"
-                                                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                                                >
-                                                    {data.revenueByService.revenue.map((entry, index) => (
-                                                        <Cell key={`service-cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                                    ))}
-                                                </Pie>
-                                                <Tooltip formatter={(value) => `₱${Number(value).toLocaleString()}`} />
-                                                <Legend />
-                                            </PieChart>
-                                        </ResponsiveContainer>
-                                    </ChartCard>
-                                ) : (
-                                    <ChartCard title="Revenue by Service">
-                                        <div className="flex items-center justify-center h-[400px] text-gray-500">
-                                            No revenue by service data available
-                                        </div>
-                                    </ChartCard>
-                                )}
-
                                 {Array.isArray(data.consumableProductSales) && data.consumableProductSales.length > 0 ? (
                                     <ChartCard title="Consumable Product Sales">
                                         <ResponsiveContainer width="100%" height={400}>
@@ -545,10 +497,10 @@ export default function Reports() {
                                 <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
                                     <div className="mb-4">
                                         <h3 className="text-lg font-semibold text-gray-900">Detailed Financial Report</h3>
-                                        <p className="text-sm text-gray-500">A summary of payment revenue, product sales, and service revenue for the selected period.</p>
+                                        <p className="text-sm text-gray-500">A summary of online and manual payments and product sales for the selected period.</p>
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
                                         <div className="rounded-xl bg-blue-50 p-4">
                                             <p className="text-sm text-blue-700">Online Revenue</p>
                                             <p className="mt-2 text-2xl font-bold text-blue-900">
@@ -561,12 +513,6 @@ export default function Reports() {
                                             <p className="mt-2 text-2xl font-bold text-emerald-900">
                                                 ₱{data.financial.revenue_by_payment_method?.filter(item => item.payment_method === 'manual' || item.payment_method === 'cash' || item.payment_method === 'walkin')
                                                     .reduce((sum, item) => sum + Number(item.total || 0), 0).toLocaleString() || 0}
-                                            </p>
-                                        </div>
-                                        <div className="rounded-xl bg-violet-50 p-4">
-                                            <p className="text-sm text-violet-700">Service Revenue</p>
-                                            <p className="mt-2 text-2xl font-bold text-violet-900">
-                                                ₱{data.revenueByService?.total_revenue_by_service?.toLocaleString() || 0}
                                             </p>
                                         </div>
                                         <div className="rounded-xl bg-amber-50 p-4">
@@ -610,201 +556,6 @@ export default function Reports() {
                     </div>
                 )}
 
-                {/* Bookings Tab */}
-                {activeTab === 'bookings' && data.bookings && (
-                    <div className="space-y-6">
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <ChartCard title="Booking Status">
-                                {data.bookings.booking_status?.length ? <ResponsiveContainer width="100%" height={300}>
-                                    <PieChart>
-                                        <Pie
-                                            data={data.bookings.booking_status}
-                                            cx="50%"
-                                            cy="50%"
-                                            labelLine={false}
-                                            label={({ status, percent }) => `${status}: ${(percent * 100).toFixed(0)}%`}
-                                            outerRadius={80}
-                                            fill="#8884d8"
-                                            dataKey="count"
-                                        >
-                                            {data.bookings.booking_status?.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip />
-                                    </PieChart>
-                                </ResponsiveContainer> : <EmptyState message="No booking status data for this period." />}
-                            </ChartCard>
-
-                            <ChartCard title="Service Popularity">
-                                {data.bookings.service_popularity?.length ? <ResponsiveContainer width="100%" height={300}>
-                                    <BarChart data={data.bookings.service_popularity}>
-                                        <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis dataKey="name" />
-                                        <YAxis />
-                                        <Tooltip />
-                                        <Bar dataKey="booking_count" fill="#0D2A94" />
-                                    </BarChart>
-                                </ResponsiveContainer> : <EmptyState message="No service bookings for this period." />}
-                            </ChartCard>
-                        </div>
-
-                        <ChartCard title="Daily Bookings">
-                            {data.bookings.daily_bookings?.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={350}>
-                                    <LineChart data={data.bookings.daily_bookings}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                                        <XAxis dataKey="date" tickFormatter={formatDate} stroke="#666" />
-                                        <YAxis stroke="#666" />
-                                        <Tooltip 
-                                            labelFormatter={formatDate}
-                                            formatter={(value) => [value, 'Bookings']}
-                                            contentStyle={{ 
-                                                backgroundColor: '#fff', 
-                                                border: '1px solid #ddd',
-                                                borderRadius: '8px',
-                                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                                            }}
-                                        />
-                                        <Line 
-                                            type="monotone" 
-                                            dataKey="count" 
-                                            stroke="#0D2A94" 
-                                            strokeWidth={3}
-                                            dot={{ fill: '#0D2A94', r: 4 }}
-                                            activeDot={{ r: 6, stroke: '#0D2A94', strokeWidth: 2 }}
-                                        />
-                                        {(() => {
-                                            const counts = data.bookings.daily_bookings.map(d => d.count);
-                                            const maxCount = Math.max(...counts);
-                                            const minCount = Math.min(...counts);
-                                            const avgCount = counts.reduce((a, b) => a + b, 0) / counts.length;
-                                            
-                                            return (
-                                                <>
-                                                    <ReferenceLine y={avgCount} stroke="#10B981" strokeDasharray="5 5" label="Average" />
-                                                    {data.bookings.daily_bookings.map((entry, index) => {
-                                                        if (entry.count === maxCount && maxCount > avgCount) {
-                                                            return (
-                                                                <ReferenceDot 
-                                                                    key={`max-${index}`}
-                                                                    x={entry.date} 
-                                                                    y={entry.count} 
-                                                                    r={8} 
-                                                                    fill="#EF4444" 
-                                                                    stroke="white" 
-                                                                    strokeWidth={2}
-                                                                    label="High"
-                                                                />
-                                                            );
-                                                        }
-                                                        if (entry.count === minCount && minCount < avgCount) {
-                                                            return (
-                                                                <ReferenceDot 
-                                                                    key={`min-${index}`}
-                                                                    x={entry.date} 
-                                                                    y={entry.count} 
-                                                                    r={8} 
-                                                                    fill="#F59E0B" 
-                                                                    stroke="white" 
-                                                                    strokeWidth={2}
-                                                                    label="Low"
-                                                                />
-                                                            );
-                                                        }
-                                                        return null;
-                                                    })}
-                                                </>
-                                            );
-                                        })()}
-                                    </LineChart>
-                                </ResponsiveContainer>
-                            ) : (
-                                <div className="flex items-center justify-center h-[350px] text-gray-500">
-                                    No daily bookings data available
-                                </div>
-                            )}
-                        </ChartCard>
-
-                        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-                            <div className="mb-4">
-                                <h3 className="text-lg font-semibold text-gray-900">Paid Booking Report</h3>
-                                <p className="text-sm text-gray-500">Detailed record of paid bookings only, excluding rejected bookings.</p>
-                            </div>
-
-                            {Array.isArray(data.bookings.paid_bookings) && data.bookings.paid_bookings.length > 0 ? (
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-left text-sm">
-                                        <thead>
-                                            <tr className="border-b border-gray-200 bg-gray-50">
-                                                <th className="px-4 py-3 font-semibold text-gray-700">Booking ID</th>
-                                                <th className="px-4 py-3 font-semibold text-gray-700">Customer</th>
-                                                <th className="px-4 py-3 font-semibold text-gray-700">Booking Date</th>
-                                                <th className="px-4 py-3 font-semibold text-gray-700">Status</th>
-                                                <th className="px-4 py-3 font-semibold text-gray-700">Amount Paid</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {data.bookings.paid_bookings.map((booking, index) => (
-                                                <tr key={`${booking.booking_id || index}`} className="border-b border-gray-100">
-                                                    <td className="px-4 py-3 font-medium text-gray-800">#{booking.booking_id}</td>
-                                                    <td className="px-4 py-3 text-gray-700">{booking.customer_name}</td>
-                                                    <td className="px-4 py-3 text-gray-700">{booking.date}</td>
-                                                    <td className="px-4 py-3">
-                                                        <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800 capitalize">
-                                                            {booking.status}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-4 py-3 font-semibold text-gray-800">₱{Number(booking.amount_paid || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ) : (
-                                <div className="flex items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-8 text-gray-500">
-                                    No paid bookings found for this date range.
-                                </div>
-                            )}
-                        </div>
-
-                        <ChartCard title="Average Rating Trend">
-                            {data.bookings.daily_ratings?.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <LineChart data={data.bookings.daily_ratings}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                                        <XAxis dataKey="date" tickFormatter={formatDate} stroke="#666" />
-                                        <YAxis domain={[0, 5]} stroke="#666" />
-                                        <Tooltip 
-                                            labelFormatter={formatDate}
-                                            formatter={(value) => [Number(value).toFixed(1), 'Rating']}
-                                            contentStyle={{ 
-                                                backgroundColor: '#fff', 
-                                                border: '1px solid #ddd',
-                                                borderRadius: '8px',
-                                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                                            }}
-                                        />
-                                        <Line 
-                                            type="monotone" 
-                                            dataKey="avg_rating" 
-                                            stroke="#10B981" 
-                                            strokeWidth={3}
-                                            dot={{ fill: '#10B981', r: 4 }}
-                                            activeDot={{ r: 6, stroke: '#10B981', strokeWidth: 2 }}
-                                        />
-                                        <ReferenceLine y={data.bookings.average_rating} stroke="#0D2A94" strokeDasharray="5 5" label="Overall Avg" />
-                                    </LineChart>
-                                </ResponsiveContainer>
-                            ) : (
-                                <div className="flex items-center justify-center h-[300px] text-gray-500">
-                                    No rating data available
-                                </div>
-                            )}
-                        </ChartCard>
-                    </div>
-                )}
-
                 {/* Job Orders Tab */}
                 {activeTab === 'jobOrders' && data.jobOrders && (
                     <div className="space-y-6">
@@ -819,10 +570,9 @@ export default function Reports() {
                                             labelLine={false}
                                             label={({ status, percent }) => `${status}: ${(percent * 100).toFixed(0)}%`}
                                             outerRadius={80}
-                                            fill="#8884d8"
                                             dataKey="count"
                                         >
-                                            {data.jobOrders.job_order_status?.map((entry, index) => (
+                                            {data.jobOrders.job_order_status.map((entry, index) => (
                                                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                             ))}
                                         </Pie>
@@ -846,9 +596,7 @@ export default function Reports() {
                                                 {data.jobOrders.staff_ratings.map((staff, index) => (
                                                     <tr key={index} className="border-b">
                                                         <td className="py-2 px-4">{staff.first_name} {staff.last_name}</td>
-                                                        <td className="py-2 px-4">
-                                                            <StarRating rating={Number(staff.avg_rating)} />
-                                                        </td>
+                                                        <td className="py-2 px-4"><StarRating rating={Number(staff.avg_rating)} /></td>
                                                         <td className="py-2 px-4">{staff.completed_jobs}</td>
                                                     </tr>
                                                 ))}
@@ -856,9 +604,7 @@ export default function Reports() {
                                         </table>
                                     </div>
                                 ) : (
-                                    <div className="flex items-center justify-center h-[300px] text-gray-500">
-                                        No staff ratings data available
-                                    </div>
+                                    <EmptyState message="No staff ratings data available." />
                                 )}
                             </ChartCard>
                         </div>
