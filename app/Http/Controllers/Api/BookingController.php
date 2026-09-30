@@ -304,7 +304,7 @@ class BookingController extends Controller
         }
 
         if (empty($redirectBase)) {
-            $redirectBase = rtrim(env('APP_URL', 'http://localhost:8000'), '/');
+            $redirectBase = rtrim(env('APP_URL', 'https://csms.serviceph.online'), '/');
         }
 
         $successRedirect = rtrim($redirectBase, '/') . '/payment/success';

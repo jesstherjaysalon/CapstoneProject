@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Models\Booking;
@@ -14,9 +15,42 @@ use App\Models\ServiceProductUsage;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Models\Service;
+use Illuminate\Validation\ValidationException;
 
 class ReportsController extends Controller
 {
+    private function validatedDateRange(Request $request): array
+    {
+        $dates = $request->validate([
+            'start_date' => ['nullable', 'date_format:Y-m-d'],
+            'end_date' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+
+        $startDate = $dates['start_date'] ?? null;
+        $endDate = $dates['end_date'] ?? null;
+
+        if ($startDate && $endDate && $endDate < $startDate) {
+            throw ValidationException::withMessages([
+                'end_date' => 'The end date must be on or after the start date.',
+            ]);
+        }
+
+        return [$startDate, $endDate];
+    }
+
+    private function applyTimestampRange($query, string $column, ?string $startDate, ?string $endDate)
+    {
+        if ($startDate) {
+            $query->where($column, '>=', Carbon::parse($startDate)->startOfDay());
+        }
+
+        if ($endDate) {
+            $query->where($column, '<=', Carbon::parse($endDate)->endOfDay());
+        }
+
+        return $query;
+    }
+
     private function getBookingFinancialSummary(Booking $booking): array
     {
         $serviceCost = (float) $booking->services->sum(function ($service) {
@@ -137,14 +171,12 @@ class ReportsController extends Controller
     // Financial Reports
     public function financial(Request $request)
     {
-        $startDate = $request->get('start_date');
-        $endDate = $request->get('end_date');
+        [$startDate, $endDate] = $this->validatedDateRange($request);
 
         $bookings = Booking::with(['profile', 'services.service', 'payments', 'manualPayments'])
             ->where('status', '!=', 'rejected')
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('date', [$startDate, $endDate]);
-            })
+            ->when($startDate, fn ($query) => $query->whereDate('date', '>=', $startDate))
+            ->when($endDate, fn ($query) => $query->whereDate('date', '<=', $endDate))
             ->get();
 
         $bookingSummaries = $bookings->map(function (Booking $booking) {
@@ -175,22 +207,16 @@ class ReportsController extends Controller
         })->values();
 
         $revenueByPaymentMethod = Payment::where('status', 'paid')
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('created_at', [$startDate, $endDate]);
-            })
+            ->when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'created_at', $startDate, $endDate))
             ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
             ->selectRaw('payment_method, SUM(amount) as total, COUNT(*) as count')
             ->groupBy('payment_method')
             ->get();
 
-        $manualPaymentTotal = ManualPayment::when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('created_at', [$startDate, $endDate]);
-            })
+        $manualPaymentTotal = ManualPayment::when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'created_at', $startDate, $endDate))
             ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
             ->sum('amount');
-        $manualPaymentCount = ManualPayment::when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('created_at', [$startDate, $endDate]);
-            })
+        $manualPaymentCount = ManualPayment::when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'created_at', $startDate, $endDate))
             ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
             ->count();
 
@@ -203,9 +229,7 @@ class ReportsController extends Controller
         }
 
         $revenueByAmountType = Payment::where('status', 'paid')
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('created_at', [$startDate, $endDate]);
-            })
+            ->when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'created_at', $startDate, $endDate))
             ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
             ->selectRaw('amount_type, SUM(amount) as total, COUNT(*) as count')
             ->groupBy('amount_type')
@@ -213,9 +237,7 @@ class ReportsController extends Controller
 
         $paymentStatus = Payment::selectRaw('status, COUNT(*) as count, SUM(amount) as total')
             ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('created_at', [$startDate, $endDate]);
-            })
+            ->when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'created_at', $startDate, $endDate))
             ->groupBy('status')
             ->get();
 
@@ -262,14 +284,12 @@ class ReportsController extends Controller
 
     public function revenueByService(Request $request)
     {
-        $startDate = $request->get('start_date') ?? now()->startOfMonth();
-        $endDate = $request->get('end_date') ?? now()->endOfMonth();
+        [$startDate, $endDate] = $this->validatedDateRange($request);
 
         $paidBookingIds = Booking::with(['services.service', 'payments', 'manualPayments'])
             ->where('status', '!=', 'rejected')
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('date', [$startDate, $endDate]);
-            })
+            ->when($startDate, fn ($query) => $query->whereDate('date', '>=', $startDate))
+            ->when($endDate, fn ($query) => $query->whereDate('date', '<=', $endDate))
             ->get()
             ->filter(function (Booking $booking) {
                 $summary = $this->getBookingFinancialSummary($booking);
@@ -278,49 +298,12 @@ class ReportsController extends Controller
             ->pluck('id')
             ->all();
 
-        $onlineRevenue = DB::table('booking_services')
+        $revenue = DB::table('booking_services')
             ->join('services', 'booking_services.service_id', '=', 'services.id')
-            ->join('bookings', 'booking_services.booking_id', '=', 'bookings.id')
-            ->join('payments', 'bookings.id', '=', 'payments.booking_id')
-            ->whereIn('bookings.id', $paidBookingIds)
-            ->where('payments.status', 'paid')
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('payments.created_at', [$startDate, $endDate]);
-            })
-            ->selectRaw('services.id, services.name, services.price, COUNT(DISTINCT bookings.id) as booking_count, SUM(services.price) as total_revenue')
+            ->whereIn('booking_services.booking_id', $paidBookingIds)
+            ->selectRaw('services.id, services.name, services.price, COUNT(DISTINCT booking_services.booking_id) as booking_count, SUM(services.price) as total_revenue')
             ->groupBy('services.id', 'services.name', 'services.price')
-            ->get()
-            ->keyBy('id');
-
-        $manualRevenue = DB::table('booking_services')
-            ->join('services', 'booking_services.service_id', '=', 'services.id')
-            ->join('bookings', 'booking_services.booking_id', '=', 'bookings.id')
-            ->join('manual_payments', 'bookings.id', '=', 'manual_payments.booking_id')
-            ->whereIn('bookings.id', $paidBookingIds)
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('manual_payments.created_at', [$startDate, $endDate]);
-            })
-            ->selectRaw('services.id, services.name, services.price, COUNT(DISTINCT bookings.id) as booking_count, SUM(services.price) as total_revenue')
-            ->groupBy('services.id', 'services.name', 'services.price')
-            ->get()
-            ->keyBy('id');
-
-        $allServiceIds = $onlineRevenue->keys()->merge($manualRevenue->keys())->unique();
-        $revenue = $allServiceIds->map(function ($serviceId) use ($onlineRevenue, $manualRevenue) {
-            $online = $onlineRevenue->get($serviceId);
-            $manual = $manualRevenue->get($serviceId);
-
-            $bookingCount = ($online?->booking_count ?? 0) + ($manual?->booking_count ?? 0);
-            $totalRevenue = ((float) ($online?->total_revenue ?? 0)) + ((float) ($manual?->total_revenue ?? 0));
-
-            return (object) [
-                'id' => $serviceId,
-                'name' => $online?->name ?? $manual?->name,
-                'price' => $online?->price ?? $manual?->price,
-                'booking_count' => $bookingCount,
-                'total_revenue' => $totalRevenue,
-            ];
-        })->values();
+            ->get();
 
         $totalRevenueByService = (float) $revenue->sum('total_revenue');
 
@@ -332,14 +315,12 @@ class ReportsController extends Controller
 
     public function consumableProductSales(Request $request)
     {
-        $startDate = $request->get('start_date');
-        $endDate = $request->get('end_date');
+        [$startDate, $endDate] = $this->validatedDateRange($request);
 
         $paidBookingIds = Booking::with(['services.service', 'payments', 'manualPayments'])
             ->where('status', '!=', 'rejected')
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('date', [$startDate, $endDate]);
-            })
+            ->when($startDate, fn ($query) => $query->whereDate('date', '>=', $startDate))
+            ->when($endDate, fn ($query) => $query->whereDate('date', '<=', $endDate))
             ->get()
             ->filter(function (Booking $booking) {
                 $summary = $this->getBookingFinancialSummary($booking);
@@ -360,9 +341,7 @@ class ReportsController extends Controller
             ->leftJoin('services as s', 'bs.service_id', '=', 's.id')
             ->where('spu.status', 'Approved')
             ->whereIn('b.id', $paidBookingIds)
-            ->when($startDate && $endDate, function ($query) use ($startDate, $endDate) {
-                return $query->whereBetween('spu.created_at', [$startDate, $endDate]);
-            })
+            ->when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'spu.created_at', $startDate, $endDate))
             ->select([
                 'spu.id as usage_id',
                 'p.id as product_id',
@@ -390,7 +369,7 @@ class ReportsController extends Controller
         $endDate = $request->get('end_date') ?? now()->endOfMonth();
 
         $bookingStatus = Booking::where('status', '!=', 'rejected')
-            ->whereBetween('created_at', [$startDate, $endDate])
+            ->whereBetween('date', [$startDate, $endDate])
             ->selectRaw('status, COUNT(*) as count')
             ->groupBy('status')
             ->get();

@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, ReferenceDot } from 'recharts';
-import { Banknote, Calendar, Package, Users, ClipboardList, TrendingUp, AlertTriangle, Clock, Star } from 'lucide-react';
+import { Banknote, Calendar, Package, Users, ClipboardList, TrendingUp, AlertTriangle, Star, RefreshCw } from 'lucide-react';
 
 const COLORS = ['#0D2A94', '#3B82F6', '#10B981', '#F59E0B', '#EF4444'];
 
@@ -10,16 +10,6 @@ const COLORS = ['#0D2A94', '#3B82F6', '#10B981', '#F59E0B', '#EF4444'];
 const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-};
-
-// Format time to 12-hour or 24-hour format (e.g., "2:00" or "14:00")
-const formatTime = (timeString) => {
-    const [hours, minutes] = timeString.split(':');
-    const hour = parseInt(hours);
-    const min = parseInt(minutes);
-    
-    // 24-hour format
-    return `${hour}:${min.toString().padStart(2, '0')}`;
 };
 
 // Star rating component
@@ -47,9 +37,12 @@ const StarRating = ({ rating }) => {
 export default function Reports() {
     const { auth } = usePage().props;
     const [activeTab, setActiveTab] = useState('overview');
-    const [loading, setLoading] = useState(true);
+    const [loadingSections, setLoadingSections] = useState({ overview: true });
+    const [requestErrors, setRequestErrors] = useState({});
     const [financialStartDate, setFinancialStartDate] = useState('');
     const [financialEndDate, setFinancialEndDate] = useState('');
+    const [filterError, setFilterError] = useState('');
+    const requestControllers = useRef({});
     const [data, setData] = useState({
         overview: null,
         financial: null,
@@ -66,69 +59,74 @@ export default function Reports() {
         fetchOverviewData();
     }, []);
 
-    const fetchOverviewData = async () => {
+    const requestReport = async (key, url) => {
+        requestControllers.current[key]?.abort();
+        const controller = new AbortController();
+        requestControllers.current[key] = controller;
+        setLoadingSections(prev => ({ ...prev, [key]: true }));
+        setRequestErrors(prev => ({ ...prev, [key]: '' }));
+
         try {
-            const response = await fetch('/admin/reports/overview', {
+            const response = await fetch(url, {
                 headers: { 'Accept': 'application/json' },
+                signal: controller.signal,
             });
+
+            if (!response.ok) {
+                throw new Error(`The report request failed (${response.status}).`);
+            }
+
             const result = await response.json();
-            setData(prev => ({ ...prev, overview: result }));
-            setLoading(false);
+            setData(prev => ({ ...prev, [key]: result }));
         } catch (error) {
-            console.error('Error fetching overview:', error);
-            setLoading(false);
+            if (error.name !== 'AbortError') {
+                console.error(`Error fetching ${key} report:`, error);
+                const message = error instanceof SyntaxError
+                    ? 'The server returned an invalid response. Please retry or contact support.'
+                    : error.message || 'Unable to load this report.';
+                setRequestErrors(prev => ({ ...prev, [key]: message }));
+            }
+        } finally {
+            if (!controller.signal.aborted) {
+                setLoadingSections(prev => ({ ...prev, [key]: false }));
+            }
         }
+    };
+
+    const buildDateRangeUrl = (endpoint, startDate, endDate) => {
+        const params = new URLSearchParams();
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
+        const query = params.toString();
+        return query ? `${endpoint}?${query}` : endpoint;
+    };
+
+    const fetchOverviewData = async () => {
+        await requestReport('overview', '/admin/reports/overview');
     };
 
     const fetchFinancialData = async (startDate = financialStartDate, endDate = financialEndDate) => {
-        try {
-            const params = new URLSearchParams();
-            if (startDate) params.append('start_date', startDate);
-            if (endDate) params.append('end_date', endDate);
-
-            const response = await fetch(`/admin/reports/financial?${params.toString()}`, {
-                headers: { 'Accept': 'application/json' },
-            });
-            const result = await response.json();
-            setData(prev => ({ ...prev, financial: result }));
-        } catch (error) {
-            console.error('Error fetching financial:', error);
-        }
+        await requestReport('financial', buildDateRangeUrl('/admin/reports/financial', startDate, endDate));
     };
 
     const fetchRevenueByService = async (startDate = financialStartDate, endDate = financialEndDate) => {
-        try {
-            const params = new URLSearchParams();
-            if (startDate) params.append('start_date', startDate);
-            if (endDate) params.append('end_date', endDate);
-
-            const response = await fetch(`/admin/reports/revenue-by-service?${params.toString()}`, {
-                headers: { 'Accept': 'application/json' },
-            });
-            const result = await response.json();
-            setData(prev => ({ ...prev, revenueByService: result }));
-        } catch (error) {
-            console.error('Error fetching revenue by service:', error);
-        }
+        await requestReport('revenueByService', buildDateRangeUrl('/admin/reports/revenue-by-service', startDate, endDate));
     };
 
     const fetchConsumableProductSales = async (startDate = financialStartDate, endDate = financialEndDate) => {
-        try {
-            const params = new URLSearchParams();
-            if (startDate) params.append('start_date', startDate);
-            if (endDate) params.append('end_date', endDate);
-
-            const response = await fetch(`/admin/reports/consumable-product-sales?${params.toString()}`, {
-                headers: { 'Accept': 'application/json' },
-            });
-            const result = await response.json();
-            setData(prev => ({ ...prev, consumableProductSales: result }));
-        } catch (error) {
-            console.error('Error fetching consumable product sales:', error);
-        }
+        await requestReport('consumableProductSales', buildDateRangeUrl('/admin/reports/consumable-product-sales', startDate, endDate));
     };
 
     const applyFinancialFilters = () => {
+        if (Boolean(financialStartDate) !== Boolean(financialEndDate)) {
+            setFilterError('Choose both a start and end date, or clear both to use the default period.');
+            return;
+        }
+        if (financialStartDate && financialEndDate < financialStartDate) {
+            setFilterError('The end date must be on or after the start date.');
+            return;
+        }
+        setFilterError('');
         fetchFinancialData(financialStartDate, financialEndDate);
         fetchRevenueByService(financialStartDate, financialEndDate);
         fetchConsumableProductSales(financialStartDate, financialEndDate);
@@ -137,69 +135,30 @@ export default function Reports() {
     const resetFinancialFilters = () => {
         setFinancialStartDate('');
         setFinancialEndDate('');
+        setFilterError('');
         fetchFinancialData('', '');
         fetchRevenueByService('', '');
         fetchConsumableProductSales('', '');
     };
 
     const fetchBookingsData = async () => {
-        try {
-            const response = await fetch('/admin/reports/bookings', {
-                headers: { 'Accept': 'application/json' },
-            });
-            const result = await response.json();
-            setData(prev => ({ ...prev, bookings: result }));
-        } catch (error) {
-            console.error('Error fetching bookings:', error);
-        }
+        await requestReport('bookings', '/admin/reports/bookings');
     };
 
     const fetchJobOrdersData = async () => {
-        try {
-            const response = await fetch('/admin/reports/job-orders', {
-                headers: { 'Accept': 'application/json' },
-            });
-            const result = await response.json();
-            setData(prev => ({ ...prev, jobOrders: result }));
-        } catch (error) {
-            console.error('Error fetching job orders:', error);
-        }
+        await requestReport('jobOrders', '/admin/reports/job-orders');
     };
 
     const fetchInventoryData = async () => {
-        try {
-            const response = await fetch('/admin/reports/inventory', {
-                headers: { 'Accept': 'application/json' },
-            });
-            const result = await response.json();
-            setData(prev => ({ ...prev, inventory: result }));
-        } catch (error) {
-            console.error('Error fetching inventory:', error);
-        }
+        await requestReport('inventory', '/admin/reports/inventory');
     };
 
     const fetchCustomersData = async () => {
-        try {
-            const response = await fetch('/admin/reports/customers', {
-                headers: { 'Accept': 'application/json' },
-            });
-            const result = await response.json();
-            setData(prev => ({ ...prev, customers: result }));
-        } catch (error) {
-            console.error('Error fetching customers:', error);
-        }
+        await requestReport('customers', '/admin/reports/customers');
     };
 
     const fetchStaffData = async () => {
-        try {
-            const response = await fetch('/admin/reports/staff', {
-                headers: { 'Accept': 'application/json' },
-            });
-            const result = await response.json();
-            setData(prev => ({ ...prev, staff: result }));
-        } catch (error) {
-            console.error('Error fetching staff:', error);
-        }
+        await requestReport('staff', '/admin/reports/staff');
     };
 
     const handleTabChange = (tab) => {
@@ -235,24 +194,32 @@ export default function Reports() {
         { id: 'jobOrders', label: 'Job Orders', icon: ClipboardList },
         { id: 'inventory', label: 'Inventory', icon: Package },
         { id: 'customers', label: 'Customers', icon: Users },
+        { id: 'staff', label: 'Staff', icon: Users },
     ];
+    const activeRequestKeys = activeTab === 'financial'
+        ? ['financial', 'revenueByService', 'consumableProductSales']
+        : [activeTab];
+    const activeDataKey = activeTab === 'jobOrders' ? 'jobOrders' : activeTab;
+    const activeLoading = activeRequestKeys.some(key => loadingSections[key]);
+    const activeErrors = activeRequestKeys.filter(key => requestErrors[key]);
 
     return (
         <AuthenticatedLayout user={auth?.user} header="Reports">
-            <div className="space-y-6">
+            <div className="space-y-5 pb-8">
                 {/* Tab Navigation */}
-                <div className="flex flex-wrap gap-2 border-b pb-4">
+                <div className="flex gap-1 overflow-x-auto border-b border-gray-200 pb-px">
                     {tabs.map((tab) => {
                         const Icon = tab.icon;
                         return (
                             <button
                                 key={tab.id}
                                 onClick={() => handleTabChange(tab.id)}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition ${
+                                className={`flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${
                                     activeTab === tab.id
-                                        ? 'bg-[#0D2A94] text-white'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                        ? 'border-blue-700 text-blue-800'
+                                        : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900'
                                 }`}
+                                aria-current={activeTab === tab.id ? 'page' : undefined}
                             >
                                 <Icon size={18} />
                                 {tab.label}
@@ -261,11 +228,37 @@ export default function Reports() {
                     })}
                 </div>
 
+                {activeErrors.map(key => (
+                    <div key={key} role="alert" className="flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 sm:flex-row sm:items-center sm:justify-between">
+                        <span>{requestErrors[key]}</span>
+                        <button
+                            onClick={() => activeTab === 'overview' ? fetchOverviewData() : handleTabChange(activeTab)}
+                            className="inline-flex items-center gap-2 self-start font-semibold text-red-900 hover:text-red-700 sm:self-auto"
+                        >
+                            <RefreshCw size={15} /> Retry
+                        </button>
+                    </div>
+                ))}
+
+                {activeLoading && data[activeDataKey] && (
+                    <p className="flex items-center gap-2 text-xs font-medium text-gray-500" role="status">
+                        <RefreshCw size={14} className="animate-spin" /> Updating report data...
+                    </p>
+                )}
+
+                {activeLoading && !data[activeDataKey] && activeTab !== 'overview' && (
+                    <div className="flex min-h-56 items-center justify-center rounded-lg border border-gray-200 bg-white text-sm text-gray-500" role="status">
+                        <span className="flex items-center gap-2"><RefreshCw size={16} className="animate-spin" /> Loading report...</span>
+                    </div>
+                )}
+
                 {/* Overview Tab */}
                 {activeTab === 'overview' && (
                     <div className="space-y-6">
-                        {loading ? (
-                            <div className="text-center py-12 text-gray-500">Loading...</div>
+                        {loadingSections.overview ? (
+                            <div className="flex min-h-56 items-center justify-center rounded-lg border border-gray-200 bg-white text-sm text-gray-500" role="status">
+                                <span className="flex items-center gap-2"><RefreshCw size={16} className="animate-spin" /> Loading overview...</span>
+                            </div>
                         ) : data.overview ? (
                             <>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -310,6 +303,8 @@ export default function Reports() {
                                     />
                                 </div>
                             </>
+                        ) : !requestErrors.overview ? (
+                            <EmptyState message="No overview data is available." />
                         ) : null}
                     </div>
                 )}
@@ -317,7 +312,7 @@ export default function Reports() {
                 {/* Financial Tab */}
                 {activeTab === 'financial' && (
                     <div className="space-y-6">
-                        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
                             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                                 <div>
                                     <h3 className="text-lg font-semibold text-gray-900">Financial Filters</h3>
@@ -329,8 +324,9 @@ export default function Reports() {
                                         <input
                                             type="date"
                                             value={financialStartDate}
-                                            onChange={(e) => setFinancialStartDate(e.target.value)}
-                                            className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-[#0D2A94] focus:outline-none"
+                                            max={financialEndDate || undefined}
+                                            onChange={(e) => { setFinancialStartDate(e.target.value); setFilterError(''); }}
+                                            className="w-full rounded-md border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-600 focus:ring-blue-600"
                                         />
                                     </div>
                                     <div>
@@ -338,26 +334,28 @@ export default function Reports() {
                                         <input
                                             type="date"
                                             value={financialEndDate}
-                                            onChange={(e) => setFinancialEndDate(e.target.value)}
-                                            className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-[#0D2A94] focus:outline-none"
+                                            min={financialStartDate || undefined}
+                                            onChange={(e) => { setFinancialEndDate(e.target.value); setFilterError(''); }}
+                                            className="w-full rounded-md border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-600 focus:ring-blue-600"
                                         />
                                     </div>
                                     <div className="flex items-end gap-2">
                                         <button
                                             onClick={applyFinancialFilters}
-                                            className="rounded-xl bg-[#0D2A94] px-4 py-2 text-sm font-semibold text-white hover:bg-[#132d9d]"
+                                            className="rounded-md bg-blue-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
                                         >
                                             Apply
                                         </button>
                                         <button
                                             onClick={resetFinancialFilters}
-                                            className="rounded-xl border border-gray-300 bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200"
+                                            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
                                         >
                                             Reset
                                         </button>
                                     </div>
                                 </div>
                             </div>
+                            {filterError && <p className="mt-3 text-sm font-medium text-red-700" role="alert">{filterError}</p>}
                         </div>
 
                         {data.financial && (
@@ -617,7 +615,7 @@ export default function Reports() {
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <ChartCard title="Booking Status">
-                                <ResponsiveContainer width="100%" height={300}>
+                                {data.bookings.booking_status?.length ? <ResponsiveContainer width="100%" height={300}>
                                     <PieChart>
                                         <Pie
                                             data={data.bookings.booking_status}
@@ -635,11 +633,11 @@ export default function Reports() {
                                         </Pie>
                                         <Tooltip />
                                     </PieChart>
-                                </ResponsiveContainer>
+                                </ResponsiveContainer> : <EmptyState message="No booking status data for this period." />}
                             </ChartCard>
 
                             <ChartCard title="Service Popularity">
-                                <ResponsiveContainer width="100%" height={300}>
+                                {data.bookings.service_popularity?.length ? <ResponsiveContainer width="100%" height={300}>
                                     <BarChart data={data.bookings.service_popularity}>
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="name" />
@@ -647,7 +645,7 @@ export default function Reports() {
                                         <Tooltip />
                                         <Bar dataKey="booking_count" fill="#0D2A94" />
                                     </BarChart>
-                                </ResponsiveContainer>
+                                </ResponsiveContainer> : <EmptyState message="No service bookings for this period." />}
                             </ChartCard>
                         </div>
 
@@ -812,7 +810,7 @@ export default function Reports() {
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <ChartCard title="Job Order Status">
-                                <ResponsiveContainer width="100%" height={300}>
+                                {data.jobOrders.job_order_status?.length ? <ResponsiveContainer width="100%" height={300}>
                                     <PieChart>
                                         <Pie
                                             data={data.jobOrders.job_order_status}
@@ -830,7 +828,7 @@ export default function Reports() {
                                         </Pie>
                                         <Tooltip />
                                     </PieChart>
-                                </ResponsiveContainer>
+                                </ResponsiveContainer> : <EmptyState message="No job order status data for this period." />}
                             </ChartCard>
 
                             <ChartCard title="Staff Ratings">
@@ -958,7 +956,7 @@ export default function Reports() {
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <ChartCard title="Stock by Category">
-                                <ResponsiveContainer width="100%" height={300}>
+                                {data.inventory.stock_by_category?.length ? <ResponsiveContainer width="100%" height={300}>
                                     <BarChart data={data.inventory.stock_by_category}>
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="name" />
@@ -966,11 +964,11 @@ export default function Reports() {
                                         <Tooltip />
                                         <Bar dataKey="total_stock" fill="#0D2A94" />
                                     </BarChart>
-                                </ResponsiveContainer>
+                                </ResponsiveContainer> : <EmptyState message="No stock category data available." />}
                             </ChartCard>
 
                             <ChartCard title="Top Product Usage">
-                                <ResponsiveContainer width="100%" height={300}>
+                                {data.inventory.product_usage?.length ? <ResponsiveContainer width="100%" height={300}>
                                     <BarChart data={data.inventory.product_usage}>
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="product.name" />
@@ -978,16 +976,16 @@ export default function Reports() {
                                         <Tooltip />
                                         <Bar dataKey="total_used" fill="#EF4444" />
                                     </BarChart>
-                                </ResponsiveContainer>
+                                </ResponsiveContainer> : <EmptyState message="No product usage data available." />}
                             </ChartCard>
                         </div>
 
-                        <div className="bg-white rounded-lg shadow-lg shadow-blue-900/20 p-6">
-                            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+                            <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900">
                                 <AlertTriangle className="text-red-500" size={20} />
                                 Low Stock Products
                             </h3>
-                            {data.inventory.low_stock_products.length > 0 ? (
+                            {data.inventory.low_stock_products?.length > 0 ? (
                                 <div className="overflow-x-auto">
                                     <table className="w-full">
                                         <thead>
@@ -1037,7 +1035,7 @@ export default function Reports() {
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <ChartCard title="Customer Registrations">
-                                <ResponsiveContainer width="100%" height={300}>
+                                {data.customers.customer_registrations?.length ? <ResponsiveContainer width="100%" height={300}>
                                     <LineChart data={data.customers.customer_registrations}>
                                         <CartesianGrid strokeDasharray="3 3" />
                                         <XAxis dataKey="date" tickFormatter={formatDate} />
@@ -1045,11 +1043,11 @@ export default function Reports() {
                                         <Tooltip labelFormatter={formatDate} />
                                         <Line type="monotone" dataKey="count" stroke="#0D2A94" strokeWidth={2} />
                                     </LineChart>
-                                </ResponsiveContainer>
+                                </ResponsiveContainer> : <EmptyState message="No customer registration data available." />}
                             </ChartCard>
 
                             <ChartCard title="Vehicle Distribution">
-                                <ResponsiveContainer width="100%" height={300}>
+                                {data.customers.vehicle_distribution?.length ? <ResponsiveContainer width="100%" height={300}>
                                     <PieChart>
                                         <Pie
                                             data={data.customers.vehicle_distribution}
@@ -1067,13 +1065,13 @@ export default function Reports() {
                                         </Pie>
                                         <Tooltip />
                                     </PieChart>
-                                </ResponsiveContainer>
+                                </ResponsiveContainer> : <EmptyState message="No vehicle distribution data available." />}
                             </ChartCard>
                         </div>
 
-                        <div className="bg-white rounded-lg shadow-lg shadow-blue-900/20 p-6">
-                            <h3 className="text-lg font-semibold mb-4">Top Customers</h3>
-                            <div className="overflow-x-auto">
+                        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+                            <h3 className="mb-4 text-base font-semibold text-gray-900">Top Customers</h3>
+                            {data.customers.top_customers?.length > 0 ? <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead>
                                         <tr className="border-b">
@@ -1082,7 +1080,7 @@ export default function Reports() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {data.customers.top_customers.map((customer, index) => (
+                                        {(data.customers.top_customers || []).map((customer, index) => (
                                             <tr key={index} className="border-b">
                                                 <td className="py-2 px-4">{customer.first_name} {customer.last_name}</td>
                                                 <td className="py-2 px-4">{customer.booking_count}</td>
@@ -1090,7 +1088,7 @@ export default function Reports() {
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </div> : <EmptyState message="No customer booking activity is available." />}
                         </div>
                     </div>
                 )}
@@ -1105,9 +1103,9 @@ export default function Reports() {
                             color="blue"
                         />
 
-                        <div className="bg-white rounded-lg shadow-lg shadow-blue-900/20 p-6">
-                            <h3 className="text-lg font-semibold mb-4">Staff Productivity</h3>
-                            <div className="overflow-x-auto">
+                        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+                            <h3 className="mb-4 text-base font-semibold text-gray-900">Staff Productivity</h3>
+                            {data.staff.staff_productivity?.length > 0 ? <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead>
                                         <tr className="border-b">
@@ -1116,7 +1114,7 @@ export default function Reports() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {data.staff.staff_productivity.map((staff, index) => (
+                                        {(data.staff.staff_productivity || []).map((staff, index) => (
                                             <tr key={index} className="border-b">
                                                 <td className="py-2 px-4">{staff.name}</td>
                                                 <td className="py-2 px-4">{staff.completed_jobs}</td>
@@ -1124,7 +1122,7 @@ export default function Reports() {
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </div> : <EmptyState message="No staff productivity data is available." />}
                         </div>
                     </div>
                 )}
@@ -1135,23 +1133,23 @@ export default function Reports() {
 
 function StatCard({ title, value, icon: Icon, color }) {
     const colorClasses = {
-        blue: 'bg-blue-50 text-blue-600',
-        green: 'bg-green-50 text-green-600',
-        purple: 'bg-purple-50 text-purple-600',
-        orange: 'bg-orange-50 text-orange-600',
-        yellow: 'bg-yellow-50 text-yellow-600',
-        red: 'bg-red-50 text-red-600',
+        blue: 'bg-blue-50 text-blue-700 ring-blue-100',
+        green: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+        purple: 'bg-indigo-50 text-indigo-700 ring-indigo-100',
+        orange: 'bg-orange-50 text-orange-700 ring-orange-100',
+        yellow: 'bg-amber-50 text-amber-700 ring-amber-100',
+        red: 'bg-rose-50 text-rose-700 ring-rose-100',
     };
 
     return (
-        <div className="bg-white rounded-lg shadow-lg shadow-blue-900/20 p-6">
+        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between">
-                <div>
-                    <p className="text-sm text-gray-600">{title}</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+                <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-500">{title}</p>
+                    <p className="mt-2 break-words text-2xl font-semibold tabular-nums text-gray-900">{value ?? '—'}</p>
                 </div>
-                <div className={`p-3 rounded-full ${colorClasses[color] || colorClasses.blue}`}>
-                    <Icon size={24} />
+                <div className={`ml-4 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ring-1 ${colorClasses[color] || colorClasses.blue}`}>
+                    <Icon size={21} aria-hidden="true" />
                 </div>
             </div>
         </div>
@@ -1160,9 +1158,17 @@ function StatCard({ title, value, icon: Icon, color }) {
 
 function ChartCard({ title, children }) {
     return (
-        <div className="bg-white rounded-lg shadow-lg shadow-blue-900/20 p-6">
-            <h3 className="text-lg font-semibold mb-4">{title}</h3>
+        <section className="min-w-0 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 className="mb-4 text-base font-semibold text-gray-900">{title}</h3>
             {children}
+        </section>
+    );
+}
+
+function EmptyState({ message }) {
+    return (
+        <div className="flex min-h-[220px] items-center justify-center rounded-md border border-dashed border-gray-200 bg-gray-50 px-4 text-center text-sm text-gray-500">
+            {message}
         </div>
     );
 }
