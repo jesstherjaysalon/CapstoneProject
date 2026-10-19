@@ -18,6 +18,7 @@ use App\Http\Controllers\ProductController;
 use App\Http\Controllers\StockTransactionController;
 use App\Http\Controllers\ServiceProductUsageController;
 use App\Http\Controllers\ReportsController;
+use App\Http\Controllers\QueueController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -95,6 +96,12 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::get('/admin/job-orders', [AppointmentController::class, 'jobOrders'])->name('admin.job-orders.index');
     Route::put('/admin/job-orders/{jobOrder}', [AppointmentController::class, 'updateJobOrderStatus'])->name('admin.job-orders.update');
     Route::put('/admin/job-orders/{jobOrder}/edit', [AppointmentController::class, 'updateJobOrder'])->name('admin.job-orders.edit');
+
+    // Queue Management Routes
+    Route::get('/admin/queue', [QueueController::class, 'index'])->name('admin.queue.index');
+    Route::put('/admin/queue/{jobOrder}/status', [QueueController::class, 'updateStatus'])->name('admin.queue.update-status');
+    Route::put('/admin/queue/{jobOrder}/priority', [QueueController::class, 'updatePriority'])->name('admin.queue.update-priority');
+    Route::put('/admin/queue/{jobOrder}/staff', [QueueController::class, 'updateStaff'])->name('admin.queue.update-staff');
 
     Route::get('/admin/inventory-management', function () {
         return Inertia::render('Admin/InventoryManagement');

@@ -21,9 +21,10 @@ import {
     Package,
     AlertTriangle,
     BarChart3,
+    ListOrdered,
 } from 'lucide-react';
 
-export default function Authenticated({ user, header, children }) {
+export default function Authenticated({ user, header, children, hideLayout = false }) {
     const safeUser = user || { role: 'Customer', name: 'Guest', email: '' };
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [mobileOpen, setMobileOpen] = useState(false);
@@ -86,12 +87,12 @@ export default function Authenticated({ user, header, children }) {
     
 
     return (
-        <div className="h-screen flex overflow-hidden bg-white relative">
+        <div className="min-h-screen bg-white relative" id="authenticated-layout">
 
             {/* Sidebar-only dark theme (no full-page accent) */}
 
             {/* MOBILE BACKDROP */}
-            {mobileOpen && (
+            {!hideLayout && mobileOpen && (
                 <div
                     onClick={() => setMobileOpen(false)}
                     className="fixed inset-0 bg-black/40 z-40 md:hidden"
@@ -99,9 +100,10 @@ export default function Authenticated({ user, header, children }) {
             )}
 
             {/* SIDEBAR */}
+            {!hideLayout && (
             <aside
                 className={`
-                    fixed md:relative z-50 h-full bg-[#0D2A94] text-white
+                    fixed z-50 h-screen bg-[#0D2A94] text-white
                     flex flex-col transition-all duration-300 shadow-lg
                     ${sidebarOpen ? 'w-64' : 'w-20'}
                     ${mobileOpen ? 'left-0' : '-left-full md:left-0'}
@@ -214,6 +216,20 @@ export default function Authenticated({ user, header, children }) {
                                 {sidebarOpen && (
                                     <span className="text-sm font-medium">
                                         Job Orders
+                                    </span>
+                                )}
+                            </NavLink>
+
+                            <NavLink
+                                href={route('admin.queue.index')}
+                                active={route().current('admin.queue.index')}
+                                className="flex items-center gap-3 px-3 py-2 rounded-lg text-white hover:bg-white/10 hover:text-white transition"
+                            >
+                                <ListOrdered size={20} />
+
+                                {sidebarOpen && (
+                                    <span className="text-sm font-medium">
+                                        Queue Management
                                     </span>
                                 )}
                             </NavLink>
@@ -345,10 +361,10 @@ export default function Authenticated({ user, header, children }) {
 
                     {sidebarOpen && (
                         <div className="mb-3">
-                            <div className="text-sm font-semibold text-white">
+                            <div className="text-sm font-semibold text-white truncate">
                                 {safeUser.name}
                             </div>
-                            <div className="text-xs text-indigo-200">
+                            <div className="text-xs text-indigo-200 truncate">
                                 {safeUser.email}
                             </div>
                         </div>
@@ -358,7 +374,7 @@ export default function Authenticated({ user, header, children }) {
                         method="post"
                         href={route('logout')}
                         as="button"
-                        className="flex items-center gap-3 text-sm text-indigo-200 hover:text-white transition"
+                        className="flex items-center gap-3 text-sm text-indigo-200 hover:text-white transition w-full"
                     >
                         <LogOut size={18} />
                         {sidebarOpen && <span>Logout</span>}
@@ -366,12 +382,14 @@ export default function Authenticated({ user, header, children }) {
                 </div>
 
             </aside>
+            )}
 
             {/* MAIN AREA */}
-            <div className="flex-1 flex flex-col relative z-20">
+            {!hideLayout && (
+            <div className={`relative z-20 min-h-screen transition-all duration-300 ${sidebarOpen ? 'md:ml-64' : 'md:ml-20'} ${mobileOpen ? 'ml-64' : 'ml-0'}`}>
 
                 {/* TOP BAR */}
-                <header className="h-16 bg-white/70 backdrop-blur border-b flex items-center justify-between px-4">
+                <header className="h-16 bg-white/70 backdrop-blur border-b flex items-center justify-between px-4 flex-shrink-0">
 
                     <button
                         onClick={() => setMobileOpen(true)}
@@ -399,6 +417,14 @@ export default function Authenticated({ user, header, children }) {
                 </main>
 
             </div>
+            )}
+
+            {/* Fullscreen Content */}
+            {hideLayout && (
+                <div className="flex-1 overflow-hidden">
+                    {children}
+                </div>
+            )}
         </div>
     );
 }

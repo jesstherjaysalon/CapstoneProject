@@ -1,10 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
-import { usePage } from '@inertiajs/react';
+import { Head, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Banknote, Calendar, Package, Users, ClipboardList, TrendingUp, AlertTriangle, Star, RefreshCw } from 'lucide-react';
 
 const COLORS = ['#0D2A94', '#3B82F6', '#10B981', '#F59E0B', '#EF4444'];
+
+const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+})}`;
 
 // Format date to month name and day (e.g., "January 15")
 const formatDate = (dateString) => {
@@ -188,6 +193,7 @@ export default function Reports() {
 
     return (
         <AuthenticatedLayout user={auth?.user} header="Reports">
+            <Head title="Reports" />
             <div className="space-y-5 pb-8">
                 {/* Tab Navigation */}
                 <div className="flex gap-1 overflow-x-auto border-b border-gray-200 pb-px">
@@ -253,7 +259,7 @@ export default function Reports() {
                                     />
                                     <StatCard
                                         title="Total Revenue"
-                                        value={`₱${data.overview.total_revenue?.toLocaleString() || 0}`}
+                                        value={formatCurrency(data.overview.total_revenue)}
                                         icon={Banknote}
                                         color="green"
                                     />
@@ -346,25 +352,25 @@ export default function Reports() {
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                     <StatCard
                                         title="Total Daily Revenue"
-                                        value={`₱${data.financial.total_daily_revenue?.toLocaleString() || 0}`}
+                                        value={formatCurrency(data.financial.total_daily_revenue)}
                                         icon={Banknote}
                                         color="blue"
                                     />
                                     <StatCard
                                         title="Total Product Sales"
-                                        value={`₱${data.financial.total_product_sales?.toLocaleString() || 0}`}
+                                        value={formatCurrency(data.financial.total_product_sales)}
                                         icon={Package}
                                         color="green"
                                     />
                                     <StatCard
                                         title="Total Revenue by Service"
-                                        value={`₱${Number(data.financial.total_revenue_by_service || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                        value={formatCurrency(data.financial.total_revenue_by_service)}
                                         icon={ClipboardList}
                                         color="purple"
                                     />
                                     <StatCard
                                         title="Total Unpaid Balance"
-                                        value={`₱${Number(data.financial.total_unpaid_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                                        value={formatCurrency(data.financial.total_unpaid_balance)}
                                         icon={AlertTriangle}
                                         color="red"
                                     />
@@ -393,7 +399,7 @@ export default function Reports() {
                                                             <td className="px-4 py-3 font-medium text-gray-800">{customer.customer_name}</td>
                                                             <td className="px-4 py-3 text-gray-700">#{customer.booking_id}</td>
                                                             <td className="px-4 py-3 text-gray-700">{customer.date}</td>
-                                                            <td className="px-4 py-3 font-semibold text-amber-700">₱{Number(customer.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                            <td className="px-4 py-3 font-semibold text-amber-700">{formatCurrency(customer.balance)}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
@@ -413,7 +419,7 @@ export default function Reports() {
                                                 <CartesianGrid strokeDasharray="3 3" />
                                                 <XAxis dataKey="date" tickFormatter={formatDate} />
                                                 <YAxis />
-                                                <Tooltip formatter={(value) => `₱${Number(value).toLocaleString()}`} labelFormatter={formatDate} />
+                                                <Tooltip formatter={formatCurrency} labelFormatter={formatDate} />
                                                 <Legend />
                                                 <Line type="monotone" dataKey="service_total" stroke="#0D2A94" strokeWidth={2} name="Total Revenue by Service" />
                                                 <Line type="monotone" dataKey="product_total" stroke="#10B981" strokeWidth={2} name="Total Product Sales" />
@@ -434,7 +440,7 @@ export default function Reports() {
                                                     <CartesianGrid strokeDasharray="3 3" />
                                                     <XAxis dataKey="payment_method" />
                                                     <YAxis />
-                                                    <Tooltip formatter={(value) => `₱${Number(value).toLocaleString()}`} />
+                                                    <Tooltip formatter={formatCurrency} />
                                                     <Bar dataKey="total" fill="#0D2A94" radius={[8, 8, 0, 0]} />
                                                 </BarChart>
                                             </ResponsiveContainer>
@@ -462,7 +468,7 @@ export default function Reports() {
                                                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                                         ))}
                                                     </Pie>
-                                                    <Tooltip formatter={(value) => `₱${Number(value).toLocaleString()}`} />
+                                                    <Tooltip formatter={formatCurrency} />
                                                     <Legend />
                                                 </PieChart>
                                             </ResponsiveContainer>
@@ -481,7 +487,7 @@ export default function Reports() {
                                                 <CartesianGrid strokeDasharray="3 3" />
                                                 <XAxis type="number" />
                                                 <YAxis dataKey="name" type="category" width={150} />
-                                                <Tooltip formatter={(value) => `₱${Number(value).toLocaleString()}`} />
+                                                <Tooltip formatter={formatCurrency} />
                                                 <Bar dataKey="total_sales" fill="#F59E0B" radius={[0, 8, 8, 0]} />
                                             </BarChart>
                                         </ResponsiveContainer>
@@ -504,21 +510,21 @@ export default function Reports() {
                                         <div className="rounded-xl bg-blue-50 p-4">
                                             <p className="text-sm text-blue-700">Online Revenue</p>
                                             <p className="mt-2 text-2xl font-bold text-blue-900">
-                                                ₱{data.financial.revenue_by_payment_method?.filter(item => item.payment_method !== 'manual' && item.payment_method !== 'cash' && item.payment_method !== 'walkin')
-                                                    .reduce((sum, item) => sum + Number(item.total || 0), 0).toLocaleString() || 0}
+                                                {formatCurrency(data.financial.revenue_by_payment_method?.filter(item => item.payment_method !== 'manual' && item.payment_method !== 'cash' && item.payment_method !== 'walkin')
+                                                    .reduce((sum, item) => sum + Number(item.total || 0), 0))}
                                             </p>
                                         </div>
                                         <div className="rounded-xl bg-emerald-50 p-4">
                                             <p className="text-sm text-emerald-700">Manual Revenue</p>
                                             <p className="mt-2 text-2xl font-bold text-emerald-900">
-                                                ₱{data.financial.revenue_by_payment_method?.filter(item => item.payment_method === 'manual' || item.payment_method === 'cash' || item.payment_method === 'walkin')
-                                                    .reduce((sum, item) => sum + Number(item.total || 0), 0).toLocaleString() || 0}
+                                                {formatCurrency(data.financial.revenue_by_payment_method?.filter(item => item.payment_method === 'manual' || item.payment_method === 'cash' || item.payment_method === 'walkin')
+                                                    .reduce((sum, item) => sum + Number(item.total || 0), 0))}
                                             </p>
                                         </div>
                                         <div className="rounded-xl bg-amber-50 p-4">
                                             <p className="text-sm text-amber-700">Product Revenue</p>
                                             <p className="mt-2 text-2xl font-bold text-amber-900">
-                                                ₱{data.financial.total_product_sales?.toLocaleString() || 0}
+                                                {formatCurrency(data.financial.total_product_sales)}
                                             </p>
                                         </div>
                                     </div>
@@ -541,7 +547,7 @@ export default function Reports() {
                                                     return (
                                                         <tr key={`${item.payment_method}-${index}`} className="border-b border-gray-100">
                                                             <td className="px-4 py-3 font-medium text-gray-800 capitalize">{item.payment_method || 'Unknown'}</td>
-                                                            <td className="px-4 py-3 text-gray-700">₱{Number(item.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                            <td className="px-4 py-3 text-gray-700">{formatCurrency(item.total)}</td>
                                                             <td className="px-4 py-3 text-gray-700">{item.count || 0}</td>
                                                             <td className="px-4 py-3 text-gray-700">{share.toFixed(1)}%</td>
                                                         </tr>

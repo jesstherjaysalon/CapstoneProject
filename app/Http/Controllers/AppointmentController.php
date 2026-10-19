@@ -19,7 +19,7 @@ class AppointmentController extends Controller
         $perPage = $request->input('per_page', 10);
         $page = $request->input('page', 1);
 
-        $bookingsQuery = Booking::with(['profile.user', 'vehicle', 'services.service', 'payments', 'manualPayments', 'services.jobOrder.staff'])
+        $bookingsQuery = Booking::with(['profile.user', 'vehicle', 'services.service', 'payments', 'manualPayments', 'services.jobOrder'])
             ->orderBy('date', 'desc');
 
         $bookings = $bookingsQuery->paginate($perPage, ['*'], 'page', $page);
@@ -102,18 +102,27 @@ class AppointmentController extends Controller
                         return [
                             'id' => $service->id,
                             'service_name' => $service->service?->name ?? 'Unknown Service',
-                            'status' => $service->status,
+                            'status' => $service->jobOrder ? $service->jobOrder->status : $service->status,
                             'scheduled_time' => $service->scheduled_time,
                             'image' => $service->image,
                             'rating' => $service->rating,
                             'price' => $service->service?->price ?? 0,
                             'job_order' => $service->jobOrder ? [
                                 'id' => $service->jobOrder->id,
-                                'staff_name' => $service->jobOrder->staff?->user?->name,
-                                'staff_id' => $service->jobOrder->profile_id,
+                                'staff_name' => $service->jobOrder->staff_names,
+                                'staff' => $service->jobOrder->staff->map(function ($profile) {
+                                    return [
+                                        'id' => $profile->id,
+                                        'name' => $profile->user->name,
+                                    ];
+                                })->toArray(),
+                                'staff_ids' => $service->jobOrder->profile_id,
                                 'start_time' => $service->jobOrder->start_time?->format('Y-m-d H:i:s'),
                                 'end_time' => $service->jobOrder->end_time?->format('Y-m-d H:i:s'),
                                 'status' => $service->jobOrder->status,
+                                'queue_number' => $service->jobOrder->queue_number ? str_pad($service->jobOrder->queue_number, 4, '0', STR_PAD_LEFT) : null,
+                                'queue_priority' => $service->jobOrder->queue_priority,
+                                'queue_date' => $service->jobOrder->queue_date ? $service->jobOrder->queue_date->format('Y-m-d') : null,
                             ] : null,
                         ];
                     })->toArray(),
@@ -195,7 +204,7 @@ class AppointmentController extends Controller
             'bookingSummary' => $bookingSummary,
             'staff' => $staff,
             'bookingStatuses' => ['pending', 'accepted', 'assigned', 'rejected', 'completed'],
-            'serviceStatuses' => ['pending', 'ongoing', 'completed'],
+            'serviceStatuses' => ['pending', 'in_progress', 'completed'],
         ]);
     }
 
@@ -215,11 +224,29 @@ class AppointmentController extends Controller
     public function updateServiceStatus(Request $request, BookingService $bookingService)
     {
         $request->validate([
-            'status' => ['required', 'in:pending,ongoing,completed'],
+            'status' => ['required', 'in:pending,in_progress,completed'],
         ]);
 
+        // Update job order status if it exists
+        $jobOrder = $bookingService->jobOrder;
+        if ($jobOrder) {
+            $jobOrder->update([
+                'status' => $request->input('status'),
+            ]);
+
+            // Update start_time and end_time based on status
+            if ($request->input('status') === 'in_progress' && !$jobOrder->start_time) {
+                $jobOrder->update(['start_time' => now()]);
+            }
+
+            if ($request->input('status') === 'completed' && !$jobOrder->end_time) {
+                $jobOrder->update(['end_time' => now()]);
+            }
+        }
+
+        // Update booking service status
         $bookingService->update([
-            'status' => $request->input('status'),
+            'status' => $request->input('status') === 'in_progress' ? 'ongoing' : $request->input('status'),
         ]);
 
         if ($request->input('status') === 'completed') {
@@ -235,16 +262,38 @@ class AppointmentController extends Controller
     public function assignStaff(Request $request, BookingService $bookingService)
     {
         $request->validate([
-            'staff_id' => ['required', 'exists:profiles,id'],
+            'staff_id' => ['required', 'array'],
+            'staff_id.*' => ['exists:profiles,id'],
         ]);
 
-        $jobOrder = JobOrder::updateOrCreate(
-            ['booking_service_id' => $bookingService->id],
-            [
-                'profile_id' => $request->input('staff_id'),
+        // Convert to array if single value is passed
+        $staffIds = is_array($request->input('staff_id'))
+            ? $request->input('staff_id')
+            : [$request->input('staff_id')];
+
+        // Check if job order already exists
+        $existingJobOrder = JobOrder::where('booking_service_id', $bookingService->id)->first();
+
+        if ($existingJobOrder) {
+            // Update existing job order (keep existing queue number)
+            $jobOrder = $existingJobOrder->update([
+                'profile_id' => $staffIds,
                 'status' => 'pending',
-            ]
-        );
+            ]);
+        } else {
+            // Generate queue number (daily reset)
+            $queueNumber = JobOrder::whereDate('queue_date', today())->max('queue_number') ?? 0;
+
+            // Create new job order with queue number (store as integer)
+            $jobOrder = JobOrder::create([
+                'booking_service_id' => $bookingService->id,
+                'profile_id' => $staffIds,
+                'status' => 'pending',
+                'queue_number' => $queueNumber + 1,
+                'queue_date' => today(),
+                'queue_priority' => 0,
+            ]);
+        }
 
         // Update booking status to 'assigned' if all services have staff assigned
         $booking = $bookingService->booking;
@@ -260,7 +309,7 @@ class AppointmentController extends Controller
 
     public function jobOrders()
     {
-        $jobOrders = JobOrder::with(['bookingService.service', 'bookingService.booking.profile', 'staff.user'])
+        $jobOrders = JobOrder::with(['bookingService.service', 'bookingService.booking.profile'])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -300,10 +349,13 @@ class AppointmentController extends Controller
                         ? trim(sprintf('%s %s', $jobOrder->bookingService->booking->profile->first_name ?? '', $jobOrder->bookingService->booking->profile->last_name ?? ''))
                         : 'Unknown',
                 ],
-                'staff' => [
-                    'id' => $jobOrder->staff->id,
-                    'name' => $jobOrder->staff->user->name,
-                ],
+                'staff' => $jobOrder->staff->map(function ($profile) {
+                    return [
+                        'id' => $profile->id,
+                        'name' => $profile->user->name,
+                    ];
+                })->toArray(),
+                'staff_name' => $jobOrder->staff_names,
                 'start_time' => $jobOrder->start_time?->format('Y-m-d H:i:s'),
                 'end_time' => $jobOrder->end_time?->format('Y-m-d H:i:s'),
                 'status' => $jobOrder->status,
@@ -363,13 +415,11 @@ class AppointmentController extends Controller
     public function updateJobOrder(Request $request, JobOrder $jobOrder)
     {
         $request->validate([
-            'profile_id' => ['nullable', 'exists:profiles,id'],
             'start_time' => ['nullable', 'date'],
             'end_time' => ['nullable', 'date', 'after:start_time'],
         ]);
 
         $jobOrder->update([
-            'profile_id' => $request->input('profile_id'),
             'start_time' => $request->input('start_time'),
             'end_time' => $request->input('end_time'),
         ]);

@@ -16,9 +16,10 @@ const statusClasses = {
     rejected: 'bg-rose-100 text-rose-800',
     completed: 'bg-emerald-100 text-emerald-800',
     ongoing: 'bg-indigo-100 text-indigo-800',
+    in_progress: 'bg-sky-100 text-sky-800',
 };
 
-export default function Appointments({ auth, bookings, pagination, bookingSummary, bookingStatuses, serviceStatuses, staff }) {
+export default function Appointments({ auth, bookings, pagination, bookingSummary, bookingStatuses, staff }) {
     const { flash = {} } = usePage().props;
     const [search, setSearch] = useState('');
     const [bookingStatusFilter, setBookingStatusFilter] = useState('');
@@ -33,6 +34,7 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
     const [remarks, setRemarks] = useState('');
     const [assignmentSuccess, setAssignmentSuccess] = useState(false);
     const [assignedCount, setAssignedCount] = useState(0);
+    const [selectedStaff, setSelectedStaff] = useState([]);
 
     const filteredBookings = useMemo(() => {
         const query = search.trim().toLowerCase();
@@ -266,18 +268,19 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
 
     const handleStaffAssign = (event, serviceId) => {
         event.preventDefault();
-        const staffId = event.target.staff_id.value;
+        const staffIds = selectedStaff.length > 0 ? selectedStaff : event.target.staff_id.value;
 
         router.put(route('admin.appointments.service.assign', serviceId), {
-            staff_id: staffId,
+            staff_id: staffIds,
         }, {
             onSuccess: () => {
                 setAssignmentSuccess(true);
                 setAssignedCount(prev => prev + 1);
+                setSelectedStaff([]);
 
                 // Check if all services are assigned
                 const totalServices = selectedBooking.services.length;
-                const unassignedServices = selectedBooking.services.filter(s => !s.job_order || !s.job_order.staff_id).length;
+                const unassignedServices = selectedBooking.services.filter(s => !s.job_order || !s.job_order.staff_ids || s.job_order.staff_ids.length === 0).length;
 
                 // If this was the last unassigned service OR if there was only 1 service total, close modal
                 if (unassignedServices === 1 || totalServices === 1) {
@@ -302,6 +305,7 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
         setIsModalOpen(true);
         setAssignmentSuccess(false);
         setAssignedCount(0);
+        setSelectedStaff([]);
     };
 
     const closeModal = () => {
@@ -426,9 +430,9 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                 className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:border-indigo-500 focus:outline-none"
                             >
                                 <option value="">All service statuses</option>
-                                {serviceStatuses.map((s) => (
-                                    <option key={s} value={s}>{s}</option>
-                                ))}
+                                <option value="pending">Waiting</option>
+                                <option value="in_progress">Serving</option>
+                                <option value="completed">Completed</option>
                             </select>
 
                             <button
@@ -724,34 +728,87 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                                             </span>
                                                             <span>₱{parseFloat(service.price || 0).toFixed(2)}</span>
                                                             {service.job_order && (
-                                                                <span>Staff: {service.job_order.staff_name || 'Unassigned'}</span>
+                                                                <>
+                                                                    <span>Staff: {service.job_order.staff_name || 'Unassigned'}</span>
+                                                                    {Array.isArray(service.job_order.staff) && service.job_order.staff.length > 1 && (
+                                                                        <span className="text-[10px] text-slate-500">({service.job_order.staff.length} staff)</span>
+                                                                    )}
+                                                                    <span className="inline-flex items-center gap-1 font-bold text-indigo-600">
+                                                                        Queue #{service.job_order.queue_number}
+                                                                    </span>
+                                                                </>
                                                             )}
                                                         </div>
                                                     </div>
                                                     <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${statusClasses[service.status] || 'bg-slate-100 text-slate-700'}`}>
-                                                        {service.status}
+                                                        {service.status === 'in_progress' ? 'Serving' : service.status === 'pending' ? 'Waiting' : service.status}
                                                     </span>
                                                 </div>
 
                                                 {selectedBooking.status === 'accepted' && (
-                                                    <form onSubmit={(event) => handleStaffAssign(event, service.id)} className="grid gap-2 sm:grid-cols-[1fr_auto] mb-3">
-                                                        <select name="staff_id" defaultValue={service.job_order?.staff_id || ''} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none">
-                                                            <option value="">Select Staff</option>
+                                                    <form onSubmit={(event) => handleStaffAssign(event, service.id)} className="mb-3">
+                                                        <label className="block text-sm font-medium text-slate-700 mb-2">Assign Staff (Multiple)</label>
+                                                        <div className="space-y-2 mb-3">
                                                             {staff.map((s) => (
-                                                                <option key={s.id} value={s.id}>{s.name}</option>
+                                                                <label key={s.id} className="flex items-center gap-2 cursor-pointer">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        name="staff_id"
+                                                                        value={s.id}
+                                                                        defaultChecked={Array.isArray(service.job_order?.staff_ids) && service.job_order.staff_ids.includes(s.id)}
+                                                                        onChange={(e) => {
+                                                                            if (e.target.checked) {
+                                                                                setSelectedStaff([...selectedStaff, s.id]);
+                                                                            } else {
+                                                                                setSelectedStaff(selectedStaff.filter(id => id !== s.id));
+                                                                            }
+                                                                        }}
+                                                                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                                                    />
+                                                                    <span className="text-sm text-slate-700">{s.name}</span>
+                                                                </label>
                                                             ))}
-                                                        </select>
+                                                        </div>
                                                         <button type="submit" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition">
-                                                            Assign
+                                                            Assign Staff
                                                         </button>
                                                     </form>
                                                 )}
 
+                                                {service.job_order && (
+                                                    <div className="flex gap-2 mb-3">
+                                                        {service.job_order.status === 'pending' && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    router.put(route('admin.queue.update-status', service.job_order.id), {
+                                                                        status: 'in_progress',
+                                                                    });
+                                                                }}
+                                                                className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 transition flex items-center gap-1"
+                                                            >
+                                                                <Clock size={12} /> Start Service
+                                                            </button>
+                                                        )}
+                                                        {service.job_order.status === 'in_progress' && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    router.put(route('admin.queue.update-status', service.job_order.id), {
+                                                                        status: 'completed',
+                                                                    });
+                                                                }}
+                                                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition flex items-center gap-1"
+                                                            >
+                                                                <CheckCircle size={12} /> Complete Service
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
+
                                                 <form onSubmit={(event) => handleServiceStatusChange(event, service.id)} className="grid gap-2 sm:grid-cols-[1fr_auto]">
                                                     <select name="status" defaultValue={service.status} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none">
-                                                        {serviceStatuses.map((status) => (
-                                                            <option key={status} value={status}>{status}</option>
-                                                        ))}
+                                                        <option value="pending">Waiting</option>
+                                                        <option value="in_progress">Serving</option>
+                                                        <option value="completed">Completed</option>
                                                     </select>
                                                     <button type="submit" className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 transition">
                                                         Save

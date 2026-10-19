@@ -25,10 +25,31 @@ class BookingController extends Controller
             return response()->json(['success' => false, 'message' => 'Profile not found'], 404);
         }
 
-        $bookings = Booking::with(['services.service', 'services.jobOrder.profile.user', 'payments', 'manualPayments'])
+        $bookings = Booking::with(['services.service', 'services.jobOrder', 'payments', 'manualPayments'])
             ->where('profile_id', $profile->id)
             ->orderBy('date', 'desc')
-            ->get();
+            ->get()
+            ->map(function ($booking) {
+                $bookingArray = $booking->toArray();
+                if (isset($bookingArray['services'])) {
+                    foreach ($bookingArray['services'] as &$service) {
+                        if (isset($service['job_order'])) {
+                            $jobOrder = $booking->services->firstWhere('id', $service['id'])?->jobOrder;
+                            if ($jobOrder) {
+                                $service['job_order']['staff'] = $jobOrder->staff->map(function ($profile) {
+                                    return [
+                                        'id' => $profile->id,
+                                        'name' => $profile->user->name,
+                                        'first_name' => $profile->first_name,
+                                        'last_name' => $profile->last_name,
+                                    ];
+                                })->toArray();
+                            }
+                        }
+                    }
+                }
+                return $bookingArray;
+            });
 
         return response()->json(['success' => true, 'data' => $bookings]);
     }
@@ -45,7 +66,7 @@ class BookingController extends Controller
             return response()->json(['success' => false, 'message' => 'Profile not found'], 404);
         }
 
-        $bookings = Booking::with(['services.service', 'services.jobOrder.profile.user', 'payments', 'manualPayments'])
+        $bookings = Booking::with(['services.service', 'services.jobOrder', 'payments', 'manualPayments'])
             ->where('profile_id', $profile->id)
             ->where('status', '!=', 'assigned')
             ->orderBy('date', 'desc')
@@ -72,7 +93,26 @@ class BookingController extends Controller
                 }
 
                 $booking->product_cost = $productCost;
-                return $booking;
+
+                $bookingArray = $booking->toArray();
+                if (isset($bookingArray['services'])) {
+                    foreach ($bookingArray['services'] as &$service) {
+                        if (isset($service['job_order'])) {
+                            $jobOrder = $booking->services->firstWhere('id', $service['id'])?->jobOrder;
+                            if ($jobOrder) {
+                                $service['job_order']['staff'] = $jobOrder->staff->map(function ($profile) {
+                                    return [
+                                        'id' => $profile->id,
+                                        'name' => $profile->user->name,
+                                        'first_name' => $profile->first_name,
+                                        'last_name' => $profile->last_name,
+                                    ];
+                                })->toArray();
+                            }
+                        }
+                    }
+                }
+                return $bookingArray;
             })
             ->toArray();
 
@@ -461,15 +501,8 @@ class BookingController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
         }
 
-        $profile = $user->profile;
-        if (!$profile) {
-            return response()->json(['success' => false, 'message' => 'Profile not found'], 404);
-        }
-
+        // Get completed services for ALL users (not just the current user)
         $completedServices = BookingService::with(['booking', 'service'])
-            ->whereHas('booking', function ($query) use ($profile) {
-                $query->where('profile_id', $profile->id);
-            })
             ->where('status', 'completed')
             ->whereNotNull('image')
             ->orderBy('updated_at', 'desc')
@@ -493,15 +526,8 @@ class BookingController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthorized'], 401);
         }
 
-        $profile = $user->profile;
-        if (!$profile) {
-            return response()->json(['success' => false, 'message' => 'Profile not found'], 404);
-        }
-
+        // Get completed services for ALL users for this specific service
         $completedServices = BookingService::with(['booking', 'service'])
-            ->whereHas('booking', function ($query) use ($profile) {
-                $query->where('profile_id', $profile->id);
-            })
             ->where('service_id', $serviceId)
             ->where('status', 'completed')
             ->whereNotNull('image')

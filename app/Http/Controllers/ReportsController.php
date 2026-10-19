@@ -336,8 +336,6 @@ class ReportsController extends Controller
             ->join('bookings as b', 'bs.booking_id', '=', 'b.id')
             ->join('profiles as customer_profile', 'b.profile_id', '=', 'customer_profile.id')
             ->join('users as customer_user', 'customer_profile.user_id', '=', 'customer_user.id')
-            ->leftJoin('profiles as staff_profile', 'jo.profile_id', '=', 'staff_profile.id')
-            ->leftJoin('users as staff_user', 'staff_profile.user_id', '=', 'staff_user.id')
             ->leftJoin('services as s', 'bs.service_id', '=', 's.id')
             ->where('spu.status', 'Approved')
             ->whereIn('b.id', $paidBookingIds)
@@ -348,7 +346,7 @@ class ReportsController extends Controller
                 'p.name as product_name',
                 'p.name',
                 'customer_user.name as customer_name',
-                'staff_user.name as staff_name',
+                'jo.profile_id as staff_ids',
                 's.name as service_name',
                 'b.id as booking_id',
                 'b.date as booking_date',
@@ -358,6 +356,34 @@ class ReportsController extends Controller
             ])
             ->orderByDesc('total_sales')
             ->get();
+
+        // Map staff_ids to staff names
+        $productSales->transform(function ($sale) {
+            $staffIds = $sale->staff_ids;
+            if ($staffIds) {
+                // If it's already an array (from JSON cast)
+                if (is_array($staffIds)) {
+                    $ids = $staffIds;
+                } else {
+                    // If it's a JSON string, decode it
+                    $ids = json_decode($staffIds, true) ?? [];
+                }
+
+                if (!empty($ids)) {
+                    $staffNames = \App\Models\Profile::whereIn('id', $ids)
+                        ->with('user')
+                        ->get()
+                        ->pluck('user.name')
+                        ->join(', ');
+                    $sale->staff_name = $staffNames ?: 'Unassigned';
+                } else {
+                    $sale->staff_name = 'Unassigned';
+                }
+            } else {
+                $sale->staff_name = 'Unassigned';
+            }
+            return $sale;
+        });
 
         return response()->json($productSales);
     }
@@ -471,22 +497,58 @@ class ReportsController extends Controller
             ->orderBy('date')
             ->get();
 
-        $staffRatings = DB::table('job_orders')
-            ->join('booking_services', 'job_orders.booking_service_id', '=', 'booking_services.id')
-            ->join('profiles', 'job_orders.profile_id', '=', 'profiles.id')
-            ->where('job_orders.status', 'completed')
-            ->whereNotNull('booking_services.rating')
-            ->whereBetween('job_orders.created_at', [$startDate, $endDate])
-            ->selectRaw('profiles.first_name, profiles.last_name, AVG(booking_services.rating) as avg_rating, COUNT(*) as completed_jobs')
-            ->groupBy('profiles.id', 'profiles.first_name', 'profiles.last_name')
-            ->orderByDesc('avg_rating')
-            ->get();
+        $staffRatings = JobOrder::with(['bookingService'])
+            ->where('status', 'completed')
+            ->whereHas('bookingService', function ($query) {
+                $query->whereNotNull('rating');
+            })
+            ->whereBetween('created_at', [$startDate, $endDate])
+            ->get()
+            ->flatMap(function ($jobOrder) {
+                $staffIds = $jobOrder->profile_id ?? [];
+                $ratings = [];
+                foreach ($staffIds as $staffId) {
+                    $profile = \App\Models\Profile::with('user')->find($staffId);
+                    if ($profile) {
+                        $ratings[] = [
+                            'first_name' => $profile->first_name,
+                            'last_name' => $profile->last_name,
+                            'avg_rating' => $jobOrder->bookingService->rating,
+                            'completed_jobs' => 1,
+                        ];
+                    }
+                }
+                return $ratings;
+            });
+
+        // Group by staff name and calculate averages
+        $staffRatingsGrouped = [];
+        foreach ($staffRatings as $rating) {
+            $key = $rating['first_name'] . '|' . $rating['last_name'];
+            if (!isset($staffRatingsGrouped[$key])) {
+                $staffRatingsGrouped[$key] = [
+                    'first_name' => $rating['first_name'],
+                    'last_name' => $rating['last_name'],
+                    'avg_rating' => 0,
+                    'completed_jobs' => 0,
+                    'total_rating' => 0,
+                ];
+            }
+            $staffRatingsGrouped[$key]['total_rating'] += $rating['avg_rating'];
+            $staffRatingsGrouped[$key]['completed_jobs'] += 1;
+        }
+
+        foreach ($staffRatingsGrouped as &$staff) {
+            $staff['avg_rating'] = $staff['total_rating'] / $staff['completed_jobs'];
+            unset($staff['total_rating']);
+        }
+
+        $staffRatingsGrouped = collect($staffRatingsGrouped)->sortByDesc('avg_rating')->values();
 
         $jobOrderHistory = JobOrder::with([
             'bookingService.service',
             'bookingService.booking.profile',
             'bookingService.booking.vehicle',
-            'profile',
         ])
             ->latest()
             ->get()
@@ -494,7 +556,7 @@ class ReportsController extends Controller
                 $booking = $jobOrder->bookingService?->booking;
                 $vehicle = $booking?->vehicle;
                 $customer = $booking?->profile;
-                $staff = $jobOrder->profile;
+                $staffNames = $jobOrder->staff_names ?? 'Unassigned';
 
                 return [
                     'id' => $jobOrder->id,
@@ -508,9 +570,7 @@ class ReportsController extends Controller
                         'model' => $vehicle->model,
                         'plate_number' => $vehicle->plate_number,
                     ] : null,
-                    'staff_name' => $staff
-                        ? trim(($staff->first_name ?? '').' '.($staff->last_name ?? ''))
-                        : null,
+                    'staff_name' => $staffNames,
                     'booking_date' => $booking?->date?->format('Y-m-d'),
                     'start_time' => $jobOrder->start_time?->toISOString(),
                     'end_time' => $jobOrder->end_time?->toISOString(),
@@ -605,14 +665,27 @@ class ReportsController extends Controller
     {
         $totalStaff = User::where('role', 'Staff')->count();
 
-        $staffProductivity = DB::table('job_orders')
-            ->join('profiles', 'job_orders.profile_id', '=', 'profiles.id')
-            ->join('users', 'profiles.user_id', '=', 'users.id')
-            ->selectRaw('users.name, COUNT(*) as completed_jobs')
-            ->where('job_orders.status', 'completed')
-            ->groupBy('users.id', 'users.name')
-            ->orderByDesc('completed_jobs')
-            ->get();
+        $jobOrders = JobOrder::where('status', 'completed')->get();
+
+        $staffProductivity = [];
+        foreach ($jobOrders as $jobOrder) {
+            $staffIds = $jobOrder->profile_id ?? [];
+            foreach ($staffIds as $staffId) {
+                $profile = \App\Models\Profile::with('user')->find($staffId);
+                if ($profile) {
+                    $key = $profile->id;
+                    if (!isset($staffProductivity[$key])) {
+                        $staffProductivity[$key] = [
+                            'name' => $profile->user->name,
+                            'completed_jobs' => 0,
+                        ];
+                    }
+                    $staffProductivity[$key]['completed_jobs'] += 1;
+                }
+            }
+        }
+
+        $staffProductivity = collect($staffProductivity)->sortByDesc('completed_jobs')->values();
 
         return response()->json([
             'total_staff' => $totalStaff,

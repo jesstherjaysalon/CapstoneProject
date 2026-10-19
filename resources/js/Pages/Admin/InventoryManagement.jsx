@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Head } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { 
@@ -7,12 +8,63 @@ import {
     PlusCircle, ClipboardList, TrendingDown, Clock
 } from 'lucide-react';
 
+const TABLE_ROWS_PER_PAGE = 10;
+
+const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+})}`;
+
+function getPageItems(items, page) {
+    const rows = Array.isArray(items) ? items : [];
+    const safePage = Math.min(page, getPageCount(rows));
+    const start = (safePage - 1) * TABLE_ROWS_PER_PAGE;
+    return rows.slice(start, start + TABLE_ROWS_PER_PAGE);
+}
+
+function getPageCount(items) {
+    const totalItems = Array.isArray(items) ? items.length : 0;
+    return Math.max(1, Math.ceil(totalItems / TABLE_ROWS_PER_PAGE));
+}
+
+function PaginationControls({ currentPage, totalItems, totalPages, onPageChange }) {
+    const safePage = Math.min(currentPage, totalPages);
+    const startItem = totalItems === 0 ? 0 : ((safePage - 1) * TABLE_ROWS_PER_PAGE) + 1;
+    const endItem = Math.min(safePage * TABLE_ROWS_PER_PAGE, totalItems);
+
+    return (
+        <div className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-slate-600">Showing {startItem} - {endItem} of {totalItems}</p>
+            <div className="flex items-center gap-2">
+                <button
+                    type="button"
+                    onClick={() => onPageChange(Math.max(1, safePage - 1))}
+                    disabled={safePage === 1}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                    Previous
+                </button>
+                <span className="text-xs font-medium text-slate-700">Page {safePage} / {totalPages}</span>
+                <button
+                    type="button"
+                    onClick={() => onPageChange(Math.min(totalPages, safePage + 1))}
+                    disabled={safePage === totalPages}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                    Next
+                </button>
+            </div>
+        </div>
+    );
+}
+
 export default function InventoryManagement({ auth }) {
     const [activeTab, setActiveTab] = useState('categories');
     
     // Categories State
     const [categories, setCategories] = useState([]);
     const [categorySearch, setCategorySearch] = useState('');
+    const [categoryPage, setCategoryPage] = useState(1);
     const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
     const [editingCategory, setEditingCategory] = useState(null);
     const [categoryFormData, setCategoryFormData] = useState({
@@ -26,6 +78,7 @@ export default function InventoryManagement({ auth }) {
     // Suppliers State
     const [suppliers, setSuppliers] = useState([]);
     const [supplierSearch, setSupplierSearch] = useState('');
+    const [supplierPage, setSupplierPage] = useState(1);
     const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
     const [editingSupplier, setEditingSupplier] = useState(null);
     const [supplierFormData, setSupplierFormData] = useState({
@@ -36,14 +89,21 @@ export default function InventoryManagement({ auth }) {
     // Products State
     const [products, setProducts] = useState([]);
     const [productSearch, setProductSearch] = useState('');
+    const [productPage, setProductPage] = useState(1);
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
     const [isStockModalOpen, setIsStockModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState(null);
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [productUsageHistory, setProductUsageHistory] = useState([]);
+    const [usageProduct, setUsageProduct] = useState(null);
+    const [isUsageModalOpen, setIsUsageModalOpen] = useState(false);
+    const [isUsageHistoryLoading, setIsUsageHistoryLoading] = useState(false);
+    const [usageHistoryError, setUsageHistoryError] = useState('');
+    const [usageHistoryPage, setUsageHistoryPage] = useState(1);
     const [allInventoryHistory, setAllInventoryHistory] = useState([]);
     const [inventoryHistoryPage, setInventoryHistoryPage] = useState(1);
     const [productSalesReport, setProductSalesReport] = useState([]);
+    const [productSalesPage, setProductSalesPage] = useState(1);
     const [lowStockCount, setLowStockCount] = useState(0);
     const [productFormData, setProductFormData] = useState({
         supplier_id: '',
@@ -67,11 +127,13 @@ export default function InventoryManagement({ auth }) {
     const [filterType, setFilterType] = useState('');
     const [filterFromDate, setFilterFromDate] = useState('');
     const [filterToDate, setFilterToDate] = useState('');
+    const [transactionPage, setTransactionPage] = useState(1);
 
     // Product Requests State
     const [requests, setRequests] = useState([]);
     const [requestSearch, setRequestSearch] = useState('');
     const [filterStatus, setFilterStatus] = useState('');
+    const [requestPage, setRequestPage] = useState(1);
 
     // Fetch Functions
     const fetchCategories = async () => {
@@ -145,15 +207,24 @@ export default function InventoryManagement({ auth }) {
     };
 
     const fetchProductUsageHistory = async (productId) => {
+        setIsUsageHistoryLoading(true);
+        setUsageHistoryError('');
         try {
             const response = await fetch(`/admin/service-product-usage?product_id=${productId}`, {
                 headers: { 'Accept': 'application/json' },
             });
+            if (!response.ok) {
+                throw new Error(`Request failed with status ${response.status}`);
+            }
             const data = await response.json();
-            setProductUsageHistory(data.data || data);
+            const history = data.data || data;
+            setProductUsageHistory(Array.isArray(history) ? history : []);
         } catch (error) {
             console.error('Error fetching product usage history:', error);
             setProductUsageHistory([]);
+            setUsageHistoryError('Unable to load product usage history. Please try again.');
+        } finally {
+            setIsUsageHistoryLoading(false);
         }
     };
 
@@ -163,7 +234,8 @@ export default function InventoryManagement({ auth }) {
                 headers: { 'Accept': 'application/json' },
             });
             const data = await response.json();
-            setAllInventoryHistory(data.data || data);
+            const history = data.data || data;
+            setAllInventoryHistory(Array.isArray(history) ? history : []);
         } catch (error) {
             console.error('Error fetching inventory history:', error);
             setAllInventoryHistory([]);
@@ -517,12 +589,27 @@ export default function InventoryManagement({ auth }) {
 
     const pendingRequests = Array.isArray(requests) ? requests.filter(r => r.status === 'Pending').length : 0;
 
-    const inventoryHistoryPerPage = 10;
-    const inventoryHistoryTotalPages = Math.max(1, Math.ceil(allInventoryHistory.length / inventoryHistoryPerPage));
-    const paginatedInventoryHistory = useMemo(() => {
-        const start = (inventoryHistoryPage - 1) * inventoryHistoryPerPage;
-        return allInventoryHistory.slice(start, start + inventoryHistoryPerPage);
-    }, [allInventoryHistory, inventoryHistoryPage]);
+    const paginatedCategories = getPageItems(filteredCategories, categoryPage);
+    const paginatedSuppliers = getPageItems(filteredSuppliers, supplierPage);
+    const paginatedProducts = getPageItems(filteredProducts, productPage);
+    const paginatedTransactions = getPageItems(filteredTransactions, transactionPage);
+    const paginatedRequests = getPageItems(filteredRequests, requestPage);
+    const paginatedSalesReport = getPageItems(productSalesReport, productSalesPage);
+    const inventoryHistoryTotalPages = getPageCount(allInventoryHistory);
+    const paginatedInventoryHistory = useMemo(
+        () => getPageItems(Array.isArray(allInventoryHistory) ? allInventoryHistory : [], inventoryHistoryPage),
+        [allInventoryHistory, inventoryHistoryPage]
+    );
+    const productUsageTotalPages = getPageCount(productUsageHistory);
+    const paginatedProductUsageHistory = useMemo(() => {
+        return getPageItems(productUsageHistory, usageHistoryPage);
+    }, [productUsageHistory, usageHistoryPage]);
+    const categoryTotalPages = getPageCount(filteredCategories);
+    const supplierTotalPages = getPageCount(filteredSuppliers);
+    const productTotalPages = getPageCount(filteredProducts);
+    const transactionTotalPages = getPageCount(filteredTransactions);
+    const requestTotalPages = getPageCount(filteredRequests);
+    const productSalesTotalPages = getPageCount(productSalesReport);
 
     useEffect(() => {
         setInventoryHistoryPage(1);
@@ -663,7 +750,10 @@ export default function InventoryManagement({ auth }) {
                                         type="text"
                                         placeholder="Search categories..."
                                         value={categorySearch}
-                                        onChange={(e) => setCategorySearch(e.target.value)}
+                                        onChange={(e) => {
+                                            setCategorySearch(e.target.value);
+                                            setCategoryPage(1);
+                                        }}
                                         className="w-full rounded-3xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-900 shadow-sm transition focus:border-indigo-500 focus:bg-white focus:outline-none"
                                     />
                                 </div>
@@ -700,7 +790,7 @@ export default function InventoryManagement({ auth }) {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-200">
-                                                    {filteredCategories.map((category) => (
+                                                    {paginatedCategories.map((category) => (
                                                         <tr key={category.id} className="hover:bg-slate-50 transition">
                                                             <td className="px-6 py-4 text-sm font-semibold text-slate-900">{category.name}</td>
                                                             <td className="px-6 py-4 text-sm text-slate-700">{category.description || '-'}</td>
@@ -743,6 +833,12 @@ export default function InventoryManagement({ auth }) {
                                                 </tbody>
                                             </table>
                                         </div>
+                                        <PaginationControls
+                                            currentPage={categoryPage}
+                                            totalItems={filteredCategories.length}
+                                            totalPages={categoryTotalPages}
+                                            onPageChange={setCategoryPage}
+                                        />
                                     </div>
                                 )}
                             </div>
@@ -775,7 +871,10 @@ export default function InventoryManagement({ auth }) {
                                         type="text"
                                         placeholder="Search suppliers..."
                                         value={supplierSearch}
-                                        onChange={(e) => setSupplierSearch(e.target.value)}
+                                        onChange={(e) => {
+                                            setSupplierSearch(e.target.value);
+                                            setSupplierPage(1);
+                                        }}
                                         className="w-full rounded-3xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-900 shadow-sm transition focus:border-indigo-500 focus:bg-white focus:outline-none"
                                     />
                                 </div>
@@ -809,7 +908,7 @@ export default function InventoryManagement({ auth }) {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-200">
-                                                    {filteredSuppliers.map((supplier) => (
+                                                    {paginatedSuppliers.map((supplier) => (
                                                         <tr key={supplier.id} className="hover:bg-slate-50 transition">
                                                             <td className="px-6 py-4 text-sm font-semibold text-slate-900">{supplier.name}</td>
                                                             <td className="px-6 py-4 text-sm text-slate-700">{supplier.contact || '-'}</td>
@@ -840,6 +939,12 @@ export default function InventoryManagement({ auth }) {
                                                 </tbody>
                                             </table>
                                         </div>
+                                        <PaginationControls
+                                            currentPage={supplierPage}
+                                            totalItems={filteredSuppliers.length}
+                                            totalPages={supplierTotalPages}
+                                            onPageChange={setSupplierPage}
+                                        />
                                     </div>
                                 )}
                             </div>
@@ -872,7 +977,10 @@ export default function InventoryManagement({ auth }) {
                                         type="text"
                                         placeholder="Search products..."
                                         value={productSearch}
-                                        onChange={(e) => setProductSearch(e.target.value)}
+                                        onChange={(e) => {
+                                            setProductSearch(e.target.value);
+                                            setProductPage(1);
+                                        }}
                                         className="w-full rounded-3xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-900 shadow-sm transition focus:border-indigo-500 focus:bg-white focus:outline-none"
                                     />
                                 </div>
@@ -909,7 +1017,7 @@ export default function InventoryManagement({ auth }) {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-200">
-                                                    {filteredProducts.map((product) => (
+                                                    {paginatedProducts.map((product) => (
                                                         <tr key={product.id} className="hover:bg-slate-50 transition">
                                                             <td className="px-6 py-4 text-sm font-semibold text-slate-900">{product.name}</td>
                                                             <td className="px-6 py-4 text-sm text-slate-700">{product.inventory_category?.name || '-'}</td>
@@ -924,7 +1032,7 @@ export default function InventoryManagement({ auth }) {
                                                                     )}
                                                                 </div>
                                                             </td>
-                                                            <td className="px-6 py-4 text-sm text-slate-700">{product.price ? `₱${parseFloat(product.price).toFixed(2)}` : '-'}</td>
+                                                            <td className="px-6 py-4 text-sm text-slate-700">{product.price ? formatCurrency(product.price) : '-'}</td>
                                                             <td className="px-6 py-4">
                                                                 <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${product.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-800'}`}>
                                                                     {product.is_active ? 'Active' : 'Inactive'}
@@ -932,7 +1040,13 @@ export default function InventoryManagement({ auth }) {
                                                             </td>
                                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                                 <button
-                                                                    onClick={() => fetchProductUsageHistory(product.id)}
+                                                                    onClick={() => {
+                                                                        setUsageProduct(product);
+                                                                        setProductUsageHistory([]);
+                                                                        setUsageHistoryPage(1);
+                                                                        setIsUsageModalOpen(true);
+                                                                        fetchProductUsageHistory(product.id);
+                                                                    }}
                                                                     className="inline-flex items-center gap-2 rounded-full bg-cyan-100 px-3 py-1.5 text-xs font-semibold text-cyan-700 hover:bg-cyan-200 transition mr-2"
                                                                 >
                                                                     Usage
@@ -980,88 +1094,12 @@ export default function InventoryManagement({ auth }) {
                                                 </tbody>
                                             </table>
                                         </div>
-                                    </div>
-                                )}
-
-                                {productUsageHistory.length > 0 && (
-                                    <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-3" style={{ boxShadow: '0 12px 30px rgba(13,42,148,0.12)' }}>
-                                        <div className="mb-3 flex items-center justify-between">
-                                            <div>
-                                                <h3 className="text-base font-semibold text-slate-900">Inventory History</h3>
-                                                <p className="text-xs text-slate-500">Product usage, customer, service, and job order tracking.</p>
-                                            </div>
-                                        </div>
-                                        <div className="overflow-x-auto">
-                                            <table className="w-full min-w-[980px] text-[11px]">
-                                                <thead>
-                                                    <tr className="border-b border-slate-200 bg-white">
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Date</th>
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Product</th>
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Type</th>
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Qty</th>
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Job Order</th>
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Category</th>
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Vehicle</th>
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Customer</th>
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Service</th>
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Stock</th>
-                                                        <th className="px-2 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Status</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-200 bg-white">
-                                                    {productUsageHistory.map((usage) => {
-                                                        const booking = usage.job_order?.booking_service?.booking;
-                                                        const vehicle = booking?.vehicle;
-                                                        const vehicleLabel = vehicle
-                                                            ? `${vehicle.brand || 'Unknown'} ${vehicle.model || ''} • ${vehicle.plate_number || 'No plate'}`.trim()
-                                                            : 'No vehicle';
-                                                        const customerName = booking?.profile
-                                                            ? `${booking.profile.first_name || ''} ${booking.profile.last_name || ''}`.trim() || 'Unknown customer'
-                                                            : 'Unknown customer';
-                                                        const jobOrderUserName = usage.job_order?.profile
-                                                            ? `${usage.job_order.profile.first_name || ''} ${usage.job_order.profile.last_name || ''}`.trim() || 'Unknown user'
-                                                            : 'Unknown user';
-                                                        const serviceName = usage.job_order?.booking_service?.service?.name || 'Service';
-                                                        const productCategory = usage.product?.inventory_category?.name || 'Uncategorized';
-                                                        const bookingDate = usage.created_at
-                                                            ? new Date(usage.created_at).toLocaleString('en-US', {
-                                                                month: 'short',
-                                                                day: 'numeric',
-                                                                year: 'numeric',
-                                                                hour: 'numeric',
-                                                                minute: '2-digit',
-                                                            })
-                                                            : 'N/A';
-                                                        const availableStock = usage.product?.current_stock ?? 0;
-
-                                                        return (
-                                                            <tr key={usage.id} className="hover:bg-slate-50 align-top">
-                                                                <td className="px-2 py-2 text-slate-700">{bookingDate}</td>
-                                                                <td className="px-2 py-2 font-semibold text-slate-900">{usage.product?.name || 'Product'}</td>
-                                                                <td className="px-2 py-2 text-slate-700">
-                                                                    <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
-                                                                        Used
-                                                                    </span>
-                                                                </td>
-                                                                <td className="px-2 py-2 font-semibold text-slate-900">{usage.quantity_used}</td>
-                                                                <td className="px-2 py-2 font-semibold text-slate-900">#{usage.job_order_id}</td>
-                                                                <td className="px-2 py-2 text-slate-700">{productCategory}</td>
-                                                                <td className="px-2 py-2 text-slate-700">{vehicleLabel}</td>
-                                                                <td className="px-2 py-2 text-slate-700">{customerName}</td>
-                                                                <td className="px-2 py-2 text-slate-700">{serviceName}</td>
-                                                                <td className="px-2 py-2 font-semibold text-slate-900">{availableStock}</td>
-                                                                <td className="px-2 py-2 text-slate-700">
-                                                                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusClasses[usage.status] || 'bg-slate-100 text-slate-800'}`}>
-                                                                        {usage.status}
-                                                                    </span>
-                                                                    <div className="mt-1 text-[10px] text-slate-500">Used by: {jobOrderUserName}</div>
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    })}
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                        <PaginationControls
+                                            currentPage={productPage}
+                                            totalItems={filteredProducts.length}
+                                            totalPages={productTotalPages}
+                                            onPageChange={setProductPage}
+                                        />
                                     </div>
                                 )}
 
@@ -1086,19 +1124,25 @@ export default function InventoryManagement({ auth }) {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-200 bg-white">
-                                                    {productSalesReport.map((sale) => (
+                                                    {paginatedSalesReport.map((sale) => (
                                                         <tr key={sale.usage_id || sale.product_id + '-' + sale.booking_id} className="hover:bg-slate-50">
                                                             <td className="px-4 py-3 text-sm font-semibold text-slate-900">{sale.product_name || sale.name || 'Product'}</td>
                                                             <td className="px-4 py-3 text-sm text-slate-700">{sale.customer_name || 'Unknown'}</td>
                                                             <td className="px-4 py-3 text-sm text-slate-700">{sale.staff_name || 'Unassigned'}</td>
                                                             <td className="px-4 py-3 text-sm text-slate-700">{sale.service_name || 'Service'}</td>
                                                             <td className="px-4 py-3 text-sm font-semibold text-slate-900">{sale.quantity_used || 0}</td>
-                                                            <td className="px-4 py-3 text-sm font-semibold text-emerald-700">₱{Number(sale.total_sales || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                                            <td className="px-4 py-3 text-sm font-semibold text-emerald-700">{formatCurrency(sale.total_sales)}</td>
                                                         </tr>
                                                     ))}
                                                 </tbody>
                                             </table>
                                         </div>
+                                        <PaginationControls
+                                            currentPage={productSalesPage}
+                                            totalItems={productSalesReport.length}
+                                            totalPages={productSalesTotalPages}
+                                            onPageChange={setProductSalesPage}
+                                        />
                                     </div>
                                 )}
                             </div>
@@ -1149,9 +1193,7 @@ export default function InventoryManagement({ auth }) {
                                                         const customerName = booking?.profile
                                                             ? `${booking.profile.first_name || ''} ${booking.profile.last_name || ''}`.trim() || 'Unknown customer'
                                                             : 'Unknown customer';
-                                                        const jobOrderUserName = usage.job_order?.profile
-                                                            ? `${usage.job_order.profile.first_name || ''} ${usage.job_order.profile.last_name || ''}`.trim() || 'Unknown user'
-                                                            : 'Unknown user';
+                                                        const jobOrderUserName = usage.staff_names || 'Unassigned';
                                                         const serviceName = usage.job_order?.booking_service?.service?.name || 'Service';
                                                         const productCategory = usage.product?.inventory_category?.name || 'Uncategorized';
                                                         const bookingDate = usage.created_at
@@ -1194,32 +1236,12 @@ export default function InventoryManagement({ auth }) {
                                             </table>
                                         </div>
 
-                                        {allInventoryHistory.length > inventoryHistoryPerPage && (
-                                            <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3">
-                                                <p className="text-xs text-slate-600">
-                                                    Showing {((inventoryHistoryPage - 1) * inventoryHistoryPerPage) + 1} - {Math.min(inventoryHistoryPage * inventoryHistoryPerPage, allInventoryHistory.length)} of {allInventoryHistory.length}
-                                                </p>
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        onClick={() => setInventoryHistoryPage((page) => Math.max(1, page - 1))}
-                                                        disabled={inventoryHistoryPage === 1}
-                                                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                                    >
-                                                        Previous
-                                                    </button>
-                                                    <span className="text-xs font-medium text-slate-700">
-                                                        Page {inventoryHistoryPage} / {inventoryHistoryTotalPages}
-                                                    </span>
-                                                    <button
-                                                        onClick={() => setInventoryHistoryPage((page) => Math.min(inventoryHistoryTotalPages, page + 1))}
-                                                        disabled={inventoryHistoryPage === inventoryHistoryTotalPages}
-                                                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                                    >
-                                                        Next
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
+                                        <PaginationControls
+                                            currentPage={inventoryHistoryPage}
+                                            totalItems={allInventoryHistory.length}
+                                            totalPages={inventoryHistoryTotalPages}
+                                            onPageChange={setInventoryHistoryPage}
+                                        />
                                     </div>
                                 )}
                             </div>
@@ -1242,13 +1264,19 @@ export default function InventoryManagement({ auth }) {
                                             type="text"
                                             placeholder="Search..."
                                             value={transactionSearch}
-                                            onChange={(e) => setTransactionSearch(e.target.value)}
+                                            onChange={(e) => {
+                                                setTransactionSearch(e.target.value);
+                                                setTransactionPage(1);
+                                            }}
                                             className="w-full rounded-3xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-900 shadow-sm transition focus:border-indigo-500 focus:bg-white focus:outline-none"
                                         />
                                     </div>
                                     <select
                                         value={filterType}
-                                        onChange={(e) => setFilterType(e.target.value)}
+                                        onChange={(e) => {
+                                            setFilterType(e.target.value);
+                                            setTransactionPage(1);
+                                        }}
                                         className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 shadow-sm focus:border-indigo-500"
                                     >
                                         <option value="">All Types</option>
@@ -1258,13 +1286,19 @@ export default function InventoryManagement({ auth }) {
                                     <input
                                         type="date"
                                         value={filterFromDate}
-                                        onChange={(e) => setFilterFromDate(e.target.value)}
+                                        onChange={(e) => {
+                                            setFilterFromDate(e.target.value);
+                                            setTransactionPage(1);
+                                        }}
                                         className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 shadow-sm focus:border-indigo-500"
                                     />
                                     <input
                                         type="date"
                                         value={filterToDate}
-                                        onChange={(e) => setFilterToDate(e.target.value)}
+                                        onChange={(e) => {
+                                            setFilterToDate(e.target.value);
+                                            setTransactionPage(1);
+                                        }}
                                         className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 shadow-sm focus:border-indigo-500"
                                     />
                                 </div>
@@ -1295,7 +1329,7 @@ export default function InventoryManagement({ auth }) {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-200">
-                                                    {filteredTransactions.map((transaction) => (
+                                                    {paginatedTransactions.map((transaction) => (
                                                         <tr key={transaction.id} className="hover:bg-slate-50 transition">
                                                             <td className="px-6 py-4 text-sm text-slate-700">
                                                                 {new Date(transaction.transaction_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
@@ -1323,6 +1357,12 @@ export default function InventoryManagement({ auth }) {
                                                 </tbody>
                                             </table>
                                         </div>
+                                        <PaginationControls
+                                            currentPage={transactionPage}
+                                            totalItems={filteredTransactions.length}
+                                            totalPages={transactionTotalPages}
+                                            onPageChange={setTransactionPage}
+                                        />
                                     </div>
                                 )}
                             </div>
@@ -1351,13 +1391,19 @@ export default function InventoryManagement({ auth }) {
                                             type="text"
                                             placeholder="Search by product or job order..."
                                             value={requestSearch}
-                                            onChange={(e) => setRequestSearch(e.target.value)}
+                                            onChange={(e) => {
+                                                setRequestSearch(e.target.value);
+                                                setRequestPage(1);
+                                            }}
                                             className="w-full rounded-3xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-900 shadow-sm transition focus:border-indigo-500 focus:bg-white focus:outline-none"
                                         />
                                     </div>
                                     <select
                                         value={filterStatus}
-                                        onChange={(e) => setFilterStatus(e.target.value)}
+                                        onChange={(e) => {
+                                            setFilterStatus(e.target.value);
+                                            setRequestPage(1);
+                                        }}
                                         className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 shadow-sm focus:border-indigo-500"
                                     >
                                         <option value="">All Status</option>
@@ -1396,7 +1442,7 @@ export default function InventoryManagement({ auth }) {
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-200">
-                                                    {filteredRequests.map((request) => {
+                                                    {paginatedRequests.map((request) => {
                                                         const insufficientStock = request.product?.current_stock < request.quantity_used;
                                                         return (
                                                             <tr key={request.id} className="hover:bg-slate-50 transition">
@@ -1453,6 +1499,12 @@ export default function InventoryManagement({ auth }) {
                                                 </tbody>
                                             </table>
                                         </div>
+                                        <PaginationControls
+                                            currentPage={requestPage}
+                                            totalItems={filteredRequests.length}
+                                            totalPages={requestTotalPages}
+                                            onPageChange={setRequestPage}
+                                        />
                                     </div>
                                 )}
                             </div>
@@ -1718,6 +1770,132 @@ export default function InventoryManagement({ auth }) {
                         </form>
                     </div>
                 </div>
+            )}
+
+            {/* Product Usage Modal */}
+            {isUsageModalOpen && usageProduct && typeof document !== 'undefined' && createPortal(
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-50 p-4">
+                    <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+                        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+                            <div>
+                                <h2 className="text-xl font-semibold text-slate-900">Usage History</h2>
+                                <p className="mt-1 text-sm text-slate-500">{usageProduct.name}</p>
+                            </div>
+                            <button
+                                onClick={() => setIsUsageModalOpen(false)}
+                                className="rounded-full p-2 text-slate-500 hover:bg-slate-200 transition"
+                                aria-label="Close usage history"
+                            >
+                                <X size={24} />
+                            </button>
+                        </div>
+
+                        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+                            {isUsageHistoryLoading ? (
+                                <p className="p-8 text-center text-sm text-slate-500">Loading usage history...</p>
+                            ) : usageHistoryError ? (
+                                <div className="p-8 text-center">
+                                    <p className="text-sm text-rose-600">{usageHistoryError}</p>
+                                    <button
+                                        onClick={() => fetchProductUsageHistory(usageProduct.id)}
+                                        className="mt-3 rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition"
+                                    >
+                                        Try again
+                                    </button>
+                                </div>
+                            ) : productUsageHistory.length === 0 ? (
+                                <p className="p-8 text-center text-sm text-slate-500">No usage history for this product.</p>
+                            ) : (
+                                <table className="w-full table-fixed text-[10px]">
+                                    <colgroup>
+                                        <col style={{ width: '11%' }} />
+                                        <col style={{ width: '10%' }} />
+                                        <col style={{ width: '6%' }} />
+                                        <col style={{ width: '5%' }} />
+                                        <col style={{ width: '8%' }} />
+                                        <col style={{ width: '8%' }} />
+                                        <col style={{ width: '12%' }} />
+                                        <col style={{ width: '11%' }} />
+                                        <col style={{ width: '11%' }} />
+                                        <col style={{ width: '6%' }} />
+                                        <col style={{ width: '12%' }} />
+                                    </colgroup>
+                                    <thead className="sticky top-0 bg-white">
+                                        <tr className="border-b border-slate-200">
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Date</th>
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Product</th>
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Type</th>
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Qty</th>
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Job Order</th>
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Category</th>
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Vehicle</th>
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Customer</th>
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Service</th>
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Stock</th>
+                                            <th className="break-words px-1.5 py-2 text-left font-semibold uppercase tracking-wide text-slate-600 [overflow-wrap:anywhere]">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-200 bg-white">
+                                        {paginatedProductUsageHistory.map((usage) => {
+                                            const booking = usage.job_order?.booking_service?.booking;
+                                            const vehicle = booking?.vehicle;
+                                            const vehicleLabel = vehicle
+                                                ? `${vehicle.brand || 'Unknown'} ${vehicle.model || ''} • ${vehicle.plate_number || 'No plate'}`.trim()
+                                                : 'No vehicle';
+                                            const customerName = booking?.profile
+                                                ? `${booking.profile.first_name || ''} ${booking.profile.last_name || ''}`.trim() || 'Unknown customer'
+                                                : 'Unknown customer';
+                                            const jobOrderUserName = usage.staff_names || 'Unassigned';
+                                            const serviceName = usage.job_order?.booking_service?.service?.name || 'Service';
+                                            const productCategory = usage.product?.inventory_category?.name || 'Uncategorized';
+                                            const bookingDate = usage.created_at
+                                                ? new Date(usage.created_at).toLocaleString('en-US', {
+                                                    month: 'short',
+                                                    day: 'numeric',
+                                                    year: 'numeric',
+                                                    hour: 'numeric',
+                                                    minute: '2-digit',
+                                                })
+                                                : 'N/A';
+                                            const availableStock = usage.product?.current_stock ?? 0;
+
+                                            return (
+                                                <tr key={usage.id} className="align-top hover:bg-slate-50">
+                                                    <td className="break-words px-1.5 py-2 text-slate-700 [overflow-wrap:anywhere]">{bookingDate}</td>
+                                                    <td className="break-words px-1.5 py-2 font-semibold text-slate-900 [overflow-wrap:anywhere]">{usage.product?.name || 'Product'}</td>
+                                                    <td className="break-words px-1.5 py-2 text-slate-700 [overflow-wrap:anywhere]">
+                                                        <span className="inline-block max-w-full break-words rounded-full bg-rose-100 px-1 py-0.5 text-[9px] font-semibold text-rose-700 [overflow-wrap:anywhere]">Used</span>
+                                                    </td>
+                                                    <td className="break-words px-1.5 py-2 font-semibold text-slate-900 [overflow-wrap:anywhere]">{usage.quantity_used}</td>
+                                                    <td className="break-words px-1.5 py-2 font-semibold text-slate-900 [overflow-wrap:anywhere]">#{usage.job_order_id}</td>
+                                                    <td className="break-words px-1.5 py-2 text-slate-700 [overflow-wrap:anywhere]">{productCategory}</td>
+                                                    <td className="break-words px-1.5 py-2 text-slate-700 [overflow-wrap:anywhere]">{vehicleLabel}</td>
+                                                    <td className="break-words px-1.5 py-2 text-slate-700 [overflow-wrap:anywhere]">{customerName}</td>
+                                                    <td className="break-words px-1.5 py-2 text-slate-700 [overflow-wrap:anywhere]">{serviceName}</td>
+                                                    <td className="break-words px-1.5 py-2 font-semibold text-slate-900 [overflow-wrap:anywhere]">{availableStock}</td>
+                                                    <td className="break-words px-1.5 py-2 text-slate-700 [overflow-wrap:anywhere]">
+                                                        <span className={`inline-block max-w-full break-words rounded-full px-1 py-0.5 text-[9px] font-semibold [overflow-wrap:anywhere] ${statusClasses[usage.status] || 'bg-slate-100 text-slate-800'}`}>
+                                                            {usage.status}
+                                                        </span>
+                                                        <div className="mt-1 text-[9px] text-slate-500 [overflow-wrap:anywhere]">Used by: {jobOrderUserName}</div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+
+                        <PaginationControls
+                            currentPage={usageHistoryPage}
+                            totalItems={productUsageHistory.length}
+                            totalPages={productUsageTotalPages}
+                            onPageChange={setUsageHistoryPage}
+                        />
+                    </div>
+                </div>,
+                document.body
             )}
         </AuthenticatedLayout>
     );

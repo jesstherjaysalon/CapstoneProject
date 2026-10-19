@@ -25,4 +25,26 @@ class Service extends Model
     {
         return $this->hasManyThrough(Booking::class, BookingService::class, 'service_id', 'id', 'id', 'booking_id');
     }
+
+    public function bookingServices()
+    {
+        return $this->hasMany(BookingService::class, 'service_id');
+    }
+
+    public function getAverageRatingAttribute()
+    {
+        $completedServices = $this->bookingServices()
+            ->where('status', 'completed')
+            ->whereNotNull('rating')
+            ->get();
+
+        if ($completedServices->isEmpty()) {
+            return 0;
+        }
+
+        $totalRating = $completedServices->sum('rating');
+        $averageRating = $totalRating / $completedServices->count();
+
+        return round($averageRating, 1);
+    }
 }

@@ -41,8 +41,61 @@ class AdminDashboardController extends Controller
         if ($endDate) {
             $paymentQuery->where('created_at', '<=', $endDate);
         }
+
+        // Calculate total revenue including service revenue and product sales (same as Reports)
+        $bookings = Booking::with(['services.service', 'payments', 'manualPayments'])
+            ->where('status', '!=', 'rejected');
+        if ($startDate) {
+            $bookings->whereDate('date', '>=', $startDate);
+        }
+        if ($endDate) {
+            $bookings->whereDate('date', '<=', $endDate);
+        }
+        $bookings = $bookings->get();
+
+        $totalServiceRevenue = 0;
+        $totalProductSales = 0;
+
+        foreach ($bookings as $booking) {
+            $serviceRevenue = (float) $booking->services->sum(function ($service) {
+                return (float) ($service->service?->price ?? 0);
+            });
+
+            $paidServiceIds = $booking->services->pluck('id')->filter()->all();
+
+            $productRevenue = (float) \App\Models\ServiceProductUsage::with('product')
+                ->whereIn('job_order_id', \App\Models\JobOrder::whereIn('booking_service_id', $paidServiceIds)->pluck('id'))
+                ->where('status', 'Approved')
+                ->whereHas('product', function ($query) {
+                    $query->whereNotNull('price')->where('price', '>', 0);
+                })
+                ->get()
+                ->sum(function ($usage) {
+                    return ((float) ($usage->product->price ?? 0)) * (int) $usage->quantity_used;
+                });
+
+            $paidAmount = (float) $booking->payments()->where('status', 'paid')->sum('amount')
+                + (float) $booking->manualPayments()->sum('amount');
+
+            $actualPaidServiceRevenue = $paidAmount > 0 ? min($serviceRevenue, $paidAmount) : 0;
+            $actualPaidProductRevenue = $paidAmount > 0 ? max(0, $paidAmount - $actualPaidServiceRevenue) : 0;
+
+            if ($productRevenue > 0 && $actualPaidProductRevenue > 0) {
+                $actualPaidProductRevenue = min($productRevenue, $actualPaidProductRevenue);
+            }
+
+            $totalPaidRevenue = $actualPaidServiceRevenue + $actualPaidProductRevenue;
+
+            if ($totalPaidRevenue > 0) {
+                $totalServiceRevenue += $actualPaidServiceRevenue;
+                $totalProductSales += $actualPaidProductRevenue;
+            }
+        }
+
+        $totalRevenue = $totalServiceRevenue + $totalProductSales;
+
         $paymentStats = [
-            'total_revenue' => (clone $paymentQuery)->where('status', 'paid')->sum('amount'),
+            'total_revenue' => $totalRevenue,
             'pending_payments' => (clone $paymentQuery)->where('status', 'pending')->count(),
             'paid_payments' => (clone $paymentQuery)->where('status', 'paid')->count(),
             'failed_payments' => (clone $paymentQuery)->where('status', 'failed')->count(),
@@ -113,27 +166,69 @@ class AdminDashboardController extends Controller
                 ];
             });
 
-        // Get monthly revenue with date filter
-        $monthlyRevenueQuery = Payment::where('status', 'paid')
-            ->selectRaw('DATE_FORMAT(created_at, "%Y-%m") as month, SUM(amount) as total');
+        // Get monthly revenue with date filter (same logic as Reports - service + product revenue)
+        $monthlyBookingsQuery = Booking::with(['services.service', 'payments', 'manualPayments'])
+            ->where('status', '!=', 'rejected');
         if ($startDate) {
-            $monthlyRevenueQuery->where('created_at', '>=', $startDate);
+            $monthlyBookingsQuery->whereDate('date', '>=', $startDate);
         } else {
-            $monthlyRevenueQuery->where('created_at', '>=', now()->subMonths(6));
+            $monthlyBookingsQuery->whereDate('date', '>=', now()->subMonths(6));
         }
         if ($endDate) {
-            $monthlyRevenueQuery->where('created_at', '<=', $endDate);
+            $monthlyBookingsQuery->whereDate('date', '<=', $endDate);
         }
-        $monthlyRevenue = $monthlyRevenueQuery
-            ->groupBy('month')
-            ->orderBy('month')
-            ->get()
-            ->map(function ($item) {
-                return [
-                    'month' => $item->month,
-                    'total' => (float) $item->total,
-                ];
+        $monthlyBookings = $monthlyBookingsQuery->get();
+
+        $monthlyRevenueMap = [];
+
+        foreach ($monthlyBookings as $booking) {
+            $serviceRevenue = (float) $booking->services->sum(function ($service) {
+                return (float) ($service->service?->price ?? 0);
             });
+
+            $paidServiceIds = $booking->services->pluck('id')->filter()->all();
+
+            $productRevenue = (float) \App\Models\ServiceProductUsage::with('product')
+                ->whereIn('job_order_id', \App\Models\JobOrder::whereIn('booking_service_id', $paidServiceIds)->pluck('id'))
+                ->where('status', 'Approved')
+                ->whereHas('product', function ($query) {
+                    $query->whereNotNull('price')->where('price', '>', 0);
+                })
+                ->get()
+                ->sum(function ($usage) {
+                    return ((float) ($usage->product->price ?? 0)) * (int) $usage->quantity_used;
+                });
+
+            $paidAmount = (float) $booking->payments()->where('status', 'paid')->sum('amount')
+                + (float) $booking->manualPayments()->sum('amount');
+
+            $actualPaidServiceRevenue = $paidAmount > 0 ? min($serviceRevenue, $paidAmount) : 0;
+            $actualPaidProductRevenue = $paidAmount > 0 ? max(0, $paidAmount - $actualPaidServiceRevenue) : 0;
+
+            if ($productRevenue > 0 && $actualPaidProductRevenue > 0) {
+                $actualPaidProductRevenue = min($productRevenue, $actualPaidProductRevenue);
+            }
+
+            $totalPaidRevenue = $actualPaidServiceRevenue + $actualPaidProductRevenue;
+
+            if ($totalPaidRevenue > 0 && $booking->date) {
+                $monthKey = $booking->date->format('Y-m');
+                if (!isset($monthlyRevenueMap[$monthKey])) {
+                    $monthlyRevenueMap[$monthKey] = 0;
+                }
+                $monthlyRevenueMap[$monthKey] += $totalPaidRevenue;
+            }
+        }
+
+        $monthlyRevenue = collect($monthlyRevenueMap)
+            ->map(function ($total, $month) {
+                return [
+                    'month' => $month,
+                    'total' => (float) $total,
+                ];
+            })
+            ->sortBy('month')
+            ->values();
 
         // Get daily bookings for Gantt chart with date filter
         $dailyBookingsQuery = Booking::selectRaw('DATE(date) as booking_date, COUNT(*) as count, status');
@@ -179,6 +274,33 @@ class AdminDashboardController extends Controller
                 ];
             });
 
+        // Get current queue data for projection
+        $today = now()->format('Y-m-d');
+        $queueData = \App\Models\JobOrder::with(['bookingService.service', 'bookingService.booking.profile'])
+            ->whereDate('queue_date', $today)
+            ->whereNotNull('queue_number')
+            ->orderBy('queue_priority', 'desc')
+            ->orderBy('queue_number', 'asc')
+            ->get()
+            ->map(function ($jobOrder) {
+                $staffIds = $jobOrder->profile_id ?? [];
+                $staffNames = [];
+                if (is_array($staffIds) && count($staffIds) > 0) {
+                    $staffProfiles = \App\Models\Profile::whereIn('id', $staffIds)->with('user')->get();
+                    $staffNames = $staffProfiles->pluck('user.name')->toArray();
+                }
+
+                return [
+                    'id' => $jobOrder->id,
+                    'queue_number' => $jobOrder->queue_number ? str_pad($jobOrder->queue_number, 4, '0', STR_PAD_LEFT) : null,
+                    'service_name' => $jobOrder->bookingService->service?->name ?? 'Unknown Service',
+                    'customer_name' => trim(($jobOrder->bookingService->booking->profile?->first_name ?? '') . ' ' . ($jobOrder->bookingService->booking->profile?->last_name ?? '')) ?: 'Unknown',
+                    'staff_names' => $staffNames,
+                    'status' => $jobOrder->status,
+                    'priority' => $jobOrder->queue_priority,
+                ];
+            });
+
         return Inertia::render('Dashboard', [
             'bookingStats' => $bookingStats,
             'paymentStats' => $paymentStats,
@@ -188,6 +310,7 @@ class AdminDashboardController extends Controller
             'monthlyRevenue' => $monthlyRevenue,
             'dailyBookings' => $dailyBookings,
             'topCustomers' => $topCustomers,
+            'queueData' => $queueData,
             'filters' => [
                 'start_date' => $startDate,
                 'end_date' => $endDate,

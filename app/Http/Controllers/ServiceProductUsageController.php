@@ -17,7 +17,6 @@ class ServiceProductUsageController extends Controller
             'jobOrder.bookingService.service',
             'jobOrder.bookingService.booking.profile.user',
             'jobOrder.bookingService.booking.vehicle',
-            'jobOrder.profile.user',
         ]);
 
         if ($request->has('status')) {
@@ -34,6 +33,13 @@ class ServiceProductUsageController extends Controller
 
         $usages = $query->orderBy('created_at', 'desc')
             ->paginate(50);
+
+        // Map the results to include staff information
+        $usages->getCollection()->transform(function ($usage) {
+            $usage->staff_names = $usage->jobOrder->staff_names ?? 'Unassigned';
+            $usage->staff = $usage->jobOrder->staff ?? [];
+            return $usage;
+        });
 
         return response()->json($usages);
     }

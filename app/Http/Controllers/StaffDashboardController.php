@@ -30,7 +30,7 @@ class StaffDashboardController extends Controller
         $staff = Auth::user()->profile;
 
         $jobOrders = JobOrder::with(['bookingService.service', 'bookingService.booking.profile', 'bookingService.booking.vehicle'])
-            ->where('profile_id', $staff->id)
+            ->whereJsonContains('profile_id', $staff->id)
             ->where('status', '!=', 'completed')
             ->orderBy('created_at', 'desc')
             ->get();
@@ -116,7 +116,7 @@ class StaffDashboardController extends Controller
         $staff = Auth::user()->profile;
 
         $jobOrders = JobOrder::with(['bookingService.service', 'bookingService.booking.profile', 'bookingService.booking.vehicle'])
-            ->where('profile_id', $staff->id)
+            ->whereJsonContains('profile_id', $staff->id)
             ->where('status', 'completed')
             ->orderBy('created_at', 'desc')
             ->get();
@@ -183,7 +183,7 @@ class StaffDashboardController extends Controller
 
         // Ensure the job order belongs to the current staff
         $staff = Auth::user()->profile;
-        if ($jobOrder->profile_id !== $staff->id) {
+        if (!in_array($staff->id, $jobOrder->profile_id ?? [])) {
             return redirect()->back()->with('error', 'Unauthorized action.');
         }
 
@@ -246,7 +246,7 @@ class StaffDashboardController extends Controller
 
         // Ensure the job order belongs to the current staff
         $staff = Auth::user()->profile;
-        if ($jobOrder->profile_id !== $staff->id) {
+        if (!in_array($staff->id, $jobOrder->profile_id ?? [])) {
             return response()->json(['error' => 'Unauthorized action.'], 403);
         }
 

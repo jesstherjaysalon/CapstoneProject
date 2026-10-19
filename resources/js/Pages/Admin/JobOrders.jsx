@@ -35,7 +35,7 @@ export default function JobOrders({ auth, jobOrders, staff, jobOrderSummary }) {
         }
 
         return jobOrders.filter((jobOrder) => {
-            const staffName = jobOrder.staff?.name || '';
+            const staffName = jobOrder.staff_name || '';
             const serviceName = jobOrder.service?.service_name || '';
             const customerName = jobOrder.customer?.name || '';
             const status = jobOrder.status || '';
@@ -80,7 +80,7 @@ export default function JobOrders({ auth, jobOrders, staff, jobOrderSummary }) {
     const handleEditJobOrder = (jobOrder) => {
         setEditingJobOrder(jobOrder);
         setEditFormData({
-            profile_id: jobOrder.staff?.id || '',
+            profile_id: jobOrder.staff?.[0]?.id || '',
             start_time: jobOrder.start_time || '',
             end_time: jobOrder.end_time || '',
         });
@@ -91,7 +91,11 @@ export default function JobOrders({ auth, jobOrders, staff, jobOrderSummary }) {
     const handleSaveEdit = async (event) => {
         event.preventDefault();
         try {
-            router.put(route('admin.job-orders.edit', editingJobOrder.id), editFormData, {
+            const dataToSend = {
+                start_time: editFormData.start_time,
+                end_time: editFormData.end_time,
+            };
+            router.put(route('admin.job-orders.edit', editingJobOrder.id), dataToSend, {
                 onSuccess: () => {
                     setIsEditModalOpen(false);
                 },
@@ -267,7 +271,7 @@ export default function JobOrders({ auth, jobOrders, staff, jobOrderSummary }) {
                                             <td className="px-6 py-4 text-sm text-slate-700">
                                                 <div className="flex items-center gap-2">
                                                     <User size={16} />
-                                                    {jobOrder.staff?.name || 'Unassigned'}
+                                                    {jobOrder.staff_name || 'Unassigned'}
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 text-sm text-slate-700">
@@ -370,16 +374,10 @@ export default function JobOrders({ auth, jobOrders, staff, jobOrderSummary }) {
                             <form onSubmit={handleSaveEdit} className="p-6 space-y-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-2">Assigned Staff</label>
-                                    <select
-                                        value={editFormData.profile_id}
-                                        onChange={(e) => setEditFormData({ ...editFormData, profile_id: e.target.value })}
-                                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none"
-                                    >
-                                        <option value="">Select Staff</option>
-                                        {staff.map((s) => (
-                                            <option key={s.id} value={s.id}>{s.name}</option>
-                                        ))}
-                                    </select>
+                                    <div className="text-sm text-slate-600 bg-slate-50 rounded-lg px-3 py-2">
+                                        {jobOrder.staff_name || 'Unassigned'}
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-1">Edit staff assignment in Queue Management</p>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-2">Start Time</label>

@@ -13,6 +13,8 @@ use App\Http\Controllers\Api\ScheduleController;
 use App\Http\Controllers\Api\BookingController;
 use App\Http\Controllers\Api\PaymentWebhookController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\StaffApiController;
+use App\Http\Controllers\ServiceProductUsageController;
 
 /*
 |--------------------------------------------------------------------------
@@ -80,6 +82,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/customer/profile', [CustomerProfileApiController::class, 'completeProfile']);
     Route::post('/customer/face', [CustomerProfileApiController::class, 'registerFace']);
     Route::apiResource('vehicles', VehicleController::class)->except(['create', 'edit']);
+
+    // Staff API routes
+    Route::get('/staff/dashboard', [StaffApiController::class, 'dashboard']);
+    Route::get('/staff/tasks', [StaffApiController::class, 'tasks']);
+    Route::get('/staff/service-assignments', [StaffApiController::class, 'serviceAssignments']);
+    Route::put('/staff/tasks/{jobOrder}', [StaffApiController::class, 'updateTaskStatus']);
+    Route::post('/staff/tasks/{jobOrder}/upload-image', [StaffApiController::class, 'uploadCompletionImage']);
+    Route::post('/staff/service-product-usage', [ServiceProductUsageController::class, 'store']);
+    Route::post('/staff/service-product-usage/{serviceProductUsage}/return', [ServiceProductUsageController::class, 'return']);
 });
 
 
