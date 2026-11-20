@@ -7,56 +7,97 @@ use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
-        // Create a new JSON column
-        Schema::table('job_orders', function (Blueprint $table) {
-            $table->json('profile_id_new')->nullable();
-        });
+        $hasProfileId = Schema::hasColumn('job_orders', 'profile_id');
+        $hasNewProfileId = Schema::hasColumn('job_orders', 'profile_id_new');
 
-        // Migrate existing single profile_id values to JSON array format
-        DB::statement('UPDATE job_orders SET profile_id_new = JSON_ARRAY(profile_id) WHERE profile_id IS NOT NULL');
+        if (!$hasProfileId && !$hasNewProfileId) {
+            throw new RuntimeException('Neither job_orders.profile_id nor its temporary migration column exists.');
+        }
 
-        // Drop the old column
-        Schema::table('job_orders', function (Blueprint $table) {
-            $table->dropColumn('profile_id');
-        });
+        if ($hasProfileId && strtolower(Schema::getColumnType('job_orders', 'profile_id')) === 'json') {
+            if ($hasNewProfileId) {
+                throw new RuntimeException('Both the JSON profile_id and profile_id_new exist; refusing to discard either column.');
+            }
+            return;
+        }
 
-        // Rename the new column to profile_id
-        Schema::table('job_orders', function (Blueprint $table) {
-            $table->renameColumn('profile_id_new', 'profile_id');
-        });
+        if (!$hasNewProfileId) {
+            Schema::table('job_orders', function (Blueprint $table) {
+                $table->json('profile_id_new')->nullable();
+            });
+        }
+
+        if ($hasProfileId) {
+            DB::statement('UPDATE job_orders SET profile_id_new = JSON_ARRAY(profile_id) WHERE profile_id IS NOT NULL');
+
+            $profileForeignKey = collect(Schema::getForeignKeys('job_orders'))
+                ->first(fn ($foreignKey) => in_array('profile_id', $foreignKey['columns'], true));
+
+            Schema::table('job_orders', function (Blueprint $table) use ($profileForeignKey) {
+                if ($profileForeignKey) {
+                    $table->dropForeign($profileForeignKey['name']);
+                }
+                $table->dropColumn('profile_id');
+            });
+        }
+
+        if (!Schema::hasColumn('job_orders', 'profile_id')
+            && Schema::hasColumn('job_orders', 'profile_id_new')) {
+            Schema::table('job_orders', function (Blueprint $table) {
+                $table->renameColumn('profile_id_new', 'profile_id');
+            });
+        }
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
-        // Create a temporary column to hold the integer data
-        Schema::table('job_orders', function (Blueprint $table) {
-            $table->unsignedBigInteger('profile_id_temp')->nullable();
-        });
+        $hasProfileId = Schema::hasColumn('job_orders', 'profile_id');
+        $hasTemporaryProfileId = Schema::hasColumn('job_orders', 'profile_id_temp');
 
-        // Migrate JSON array back to single value (take first element)
-        DB::statement('UPDATE job_orders SET profile_id_temp = JSON_UNQUOTE(JSON_EXTRACT(profile_id, "$[0]")) WHERE profile_id IS NOT NULL');
+        if ($hasProfileId && strtolower(Schema::getColumnType('job_orders', 'profile_id')) !== 'json') {
+            $this->restoreProfileForeignKey();
+            return;
+        }
 
-        // Drop the old JSON column
-        Schema::table('job_orders', function (Blueprint $table) {
-            $table->dropColumn('profile_id');
-        });
+        if (!$hasProfileId && !$hasTemporaryProfileId) {
+            throw new RuntimeException('Neither job_orders.profile_id nor its temporary rollback column exists.');
+        }
 
-        // Rename the temp column to profile_id
-        Schema::table('job_orders', function (Blueprint $table) {
-            $table->renameColumn('profile_id_temp', 'profile_id');
-        });
+        if ($hasProfileId) {
+            if (!$hasTemporaryProfileId) {
+                Schema::table('job_orders', function (Blueprint $table) {
+                    $table->unsignedBigInteger('profile_id_temp')->nullable();
+                });
+            }
 
-        // Add foreign key constraint back
-        Schema::table('job_orders', function (Blueprint $table) {
-            $table->foreign('profile_id')->references('id')->on('profiles')->nullOnDelete();
-        });
+            DB::statement("UPDATE job_orders SET profile_id_temp = JSON_UNQUOTE(JSON_EXTRACT(profile_id, '$[0]')) WHERE profile_id IS NOT NULL");
+
+            Schema::table('job_orders', function (Blueprint $table) {
+                $table->dropColumn('profile_id');
+            });
+        }
+
+        if (!Schema::hasColumn('job_orders', 'profile_id')
+            && Schema::hasColumn('job_orders', 'profile_id_temp')) {
+            Schema::table('job_orders', function (Blueprint $table) {
+                $table->renameColumn('profile_id_temp', 'profile_id');
+            });
+        }
+
+        $this->restoreProfileForeignKey();
+    }
+
+    private function restoreProfileForeignKey(): void
+    {
+        $hasProfileForeignKey = collect(Schema::getForeignKeys('job_orders'))
+            ->contains(fn ($foreignKey) => in_array('profile_id', $foreignKey['columns'], true));
+
+        if (!$hasProfileForeignKey) {
+            Schema::table('job_orders', function (Blueprint $table) {
+                $table->foreign('profile_id')->references('id')->on('profiles')->nullOnDelete();
+            });
+        }
     }
 };

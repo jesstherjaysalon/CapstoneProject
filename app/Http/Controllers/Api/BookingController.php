@@ -9,10 +9,13 @@ use App\Models\BookingService;
 use App\Models\ManualPayment;
 use App\Models\Payment;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 class BookingController extends Controller
 {
+    private const CANCELLATION_FEE_CENTS = 5000;
+
     public function index(Request $request)
     {
         $user = Auth::user();
@@ -52,6 +55,76 @@ class BookingController extends Controller
             });
 
         return response()->json(['success' => true, 'data' => $bookings]);
+    }
+
+    public function cancel(Request $request, $bookingId)
+    {
+        $profile = $request->user()?->profile;
+        if (!$profile) {
+            return response()->json(['success' => false, 'message' => 'Profile not found'], 404);
+        }
+
+        $result = DB::transaction(function () use ($profile, $bookingId) {
+            $booking = Booking::where('id', $bookingId)
+                ->where('profile_id', $profile->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$booking) {
+                return response()->json(['success' => false, 'message' => 'Booking not found'], 404);
+            }
+
+            if (!in_array($booking->status, ['pending', 'accepted'], true)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only pending or accepted bookings can be cancelled.',
+                ], 409);
+            }
+
+            $hasPendingPayment = $booking->payments()->where('status', 'pending')->exists();
+
+            $onlinePaidCents = (int) round(
+                (float) $booking->payments()->where('status', 'paid')->sum('amount') * 100
+            );
+            $manualPaidCents = (int) round((float) $booking->manualPayments()->sum('amount') * 100);
+            $paidAmountCents = $onlinePaidCents + $manualPaidCents;
+            $cancellationFeeCents = min($paidAmountCents, self::CANCELLATION_FEE_CENTS);
+            $refundAmountCents = max(0, $paidAmountCents - self::CANCELLATION_FEE_CENTS);
+
+            $booking->update([
+                'status' => 'cancelled',
+                'cancellation_paid_amount' => number_format($paidAmountCents / 100, 2, '.', ''),
+                'cancellation_fee' => number_format($cancellationFeeCents / 100, 2, '.', ''),
+                'refund_amount' => number_format($refundAmountCents / 100, 2, '.', ''),
+                'cancelled_at' => now(),
+            ]);
+
+            $message = $paidAmountCents > 0
+                ? 'Booking cancelled. Present the refund receipt at the office to request your refund in person. No online refund is issued.'
+                : 'Booking cancelled successfully.';
+
+            if ($hasPendingPayment) {
+                $message .= $paidAmountCents > 0
+                    ? ' Another payment is still processing; refresh booking history if it completes to update the receipt.'
+                    : ' A payment is still processing; if it completes, refresh booking history to get an updated refund receipt for the office.';
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'data' => [
+                    'booking_id' => $booking->id,
+                    'status' => $booking->status,
+                    'cancellation_paid_amount' => number_format($paidAmountCents / 100, 2, '.', ''),
+                    'cancellation_fee' => number_format($cancellationFeeCents / 100, 2, '.', ''),
+                    'refund_amount' => number_format($refundAmountCents / 100, 2, '.', ''),
+                    'cancelled_at' => $booking->cancelled_at->toIso8601String(),
+                    'payment_pending' => $hasPendingPayment,
+                ],
+            ]);
+        });
+
+        return $result;
     }
 
     public function completed(Request $request)

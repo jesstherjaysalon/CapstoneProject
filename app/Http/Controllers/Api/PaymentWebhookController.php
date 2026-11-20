@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Payment;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -68,6 +69,13 @@ class PaymentWebhookController extends Controller
         if (!$payment) {
             Log::warning("Payment not found for source ID: {$sourceId}");
             return response()->json(['success' => false, 'message' => 'Payment not found'], 404);
+        }
+
+        if ($payment->booking?->status === 'cancelled') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot charge a payment for a cancelled booking.',
+            ], 409);
         }
 
         // Update source status
@@ -152,17 +160,30 @@ class PaymentWebhookController extends Controller
             return response()->json(['success' => false, 'message' => 'Payment not found'], 404);
         }
 
-        // Update payment status to paid
-        $payment->status = 'paid';
-        $payment->paymongo_payment_status = 'paid';
-        $payment->paymongo_source_status = 'paid';
-        $payment->save();
+        DB::transaction(function () use ($payment) {
+            $booking = $payment->booking()->lockForUpdate()->first();
+            $lockedPayment = Payment::whereKey($payment->id)->lockForUpdate()->first();
+            $lockedPayment->status = 'paid';
+            $lockedPayment->paymongo_payment_status = 'paid';
+            $lockedPayment->paymongo_source_status = 'paid';
+            $lockedPayment->save();
 
-        // Update booking status
-        if ($payment->booking) {
-            $payment->booking->status = 'accepted';
-            $payment->booking->save();
-        }
+            if ($booking && $booking->status !== 'cancelled') {
+                $booking->status = 'accepted';
+                $booking->save();
+            } elseif ($booking) {
+                $paidCents = (int) round(
+                    (float) $booking->payments()->where('status', 'paid')->sum('amount') * 100
+                    + (float) $booking->manualPayments()->sum('amount') * 100
+                );
+                $feeCents = min($paidCents, 5000);
+                $booking->update([
+                    'cancellation_paid_amount' => number_format($paidCents / 100, 2, '.', ''),
+                    'cancellation_fee' => number_format($feeCents / 100, 2, '.', ''),
+                    'refund_amount' => number_format(max(0, $paidCents - 5000) / 100, 2, '.', ''),
+                ]);
+            }
+        });
 
         Log::info("Payment {$payment->id} marked as paid, PayMongo payment ID: {$paymentId}");
 

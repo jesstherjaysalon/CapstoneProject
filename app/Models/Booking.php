@@ -16,6 +16,10 @@ class Booking extends Model
 
     protected $casts = [
         'date' => 'date',
+        'cancellation_paid_amount' => 'decimal:2',
+        'cancellation_fee' => 'decimal:2',
+        'refund_amount' => 'decimal:2',
+        'cancelled_at' => 'datetime',
     ];
 
     protected $fillable = [
@@ -25,6 +29,10 @@ class Booking extends Model
         'status',
         'rating',
         'feedback',
+        'cancellation_paid_amount',
+        'cancellation_fee',
+        'refund_amount',
+        'cancelled_at',
     ];
 
     public function profile()

@@ -196,6 +196,7 @@ class StaffDashboardController extends Controller
 
             $hasOutstandingReturnableUsage = ServiceProductUsage::where('job_order_id', $jobOrder->id)
                 ->whereNull('returned_at')
+                ->where('status', '!=', 'Rejected')
                 ->whereHas('product.inventoryCategory', function ($query) {
                     $query->where('is_asset', true);
                 })

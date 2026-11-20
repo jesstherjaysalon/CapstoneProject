@@ -18,7 +18,7 @@ class AdminDashboardController extends Controller
         $startDate = $request->input('start_date');
         $endDate = $request->input('end_date');
         // Get booking statistics with date filter
-        $bookingQuery = Booking::query();
+        $bookingQuery = Booking::query()->where('status', '!=', 'cancelled');
         if ($startDate) {
             $bookingQuery->where('date', '>=', $startDate);
         }
@@ -55,8 +55,14 @@ class AdminDashboardController extends Controller
 
         $totalServiceRevenue = 0;
         $totalProductSales = 0;
+        $totalCancellationFees = 0;
 
         foreach ($bookings as $booking) {
+            if ($booking->status === 'cancelled') {
+                $totalCancellationFees += (float) ($booking->cancellation_fee ?? 0);
+                continue;
+            }
+
             $serviceRevenue = (float) $booking->services->sum(function ($service) {
                 return (float) ($service->service?->price ?? 0);
             });
@@ -92,10 +98,11 @@ class AdminDashboardController extends Controller
             }
         }
 
-        $totalRevenue = $totalServiceRevenue + $totalProductSales;
+        $totalRevenue = $totalServiceRevenue + $totalProductSales + $totalCancellationFees;
 
         $paymentStats = [
             'total_revenue' => $totalRevenue,
+            'total_cancellation_fees' => $totalCancellationFees,
             'pending_payments' => (clone $paymentQuery)->where('status', 'pending')->count(),
             'paid_payments' => (clone $paymentQuery)->where('status', 'paid')->count(),
             'failed_payments' => (clone $paymentQuery)->where('status', 'failed')->count(),
@@ -182,6 +189,18 @@ class AdminDashboardController extends Controller
         $monthlyRevenueMap = [];
 
         foreach ($monthlyBookings as $booking) {
+            if ($booking->status === 'cancelled') {
+                $cancellationFee = (float) ($booking->cancellation_fee ?? 0);
+                if ($cancellationFee > 0 && $booking->date) {
+                    $monthKey = $booking->date->format('Y-m');
+                    if (!isset($monthlyRevenueMap[$monthKey])) {
+                        $monthlyRevenueMap[$monthKey] = 0;
+                    }
+                    $monthlyRevenueMap[$monthKey] += $cancellationFee;
+                }
+                continue;
+            }
+
             $serviceRevenue = (float) $booking->services->sum(function ($service) {
                 return (float) ($service->service?->price ?? 0);
             });
@@ -274,9 +293,35 @@ class AdminDashboardController extends Controller
                 ];
             });
 
-        // Get current queue data for projection
+        $queueData = $this->getQueueData();
+
+        return Inertia::render('Dashboard', [
+            'bookingStats' => $bookingStats,
+            'paymentStats' => $paymentStats,
+            'userStats' => $userStats,
+            'recentBookings' => $recentBookings,
+            'topServices' => $topServices,
+            'monthlyRevenue' => $monthlyRevenue,
+            'dailyBookings' => $dailyBookings,
+            'topCustomers' => $topCustomers,
+            'queueData' => $queueData,
+            'filters' => [
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+            ],
+        ]);
+    }
+
+    public function queueDisplay(): \Illuminate\Http\JsonResponse
+    {
+        return response()->json($this->getQueueData());
+    }
+
+    private function getQueueData()
+    {
         $today = now()->format('Y-m-d');
-        $queueData = \App\Models\JobOrder::with(['bookingService.service', 'bookingService.booking.profile'])
+
+        return \App\Models\JobOrder::with(['bookingService.service', 'bookingService.booking.profile'])
             ->whereDate('queue_date', $today)
             ->whereNotNull('queue_number')
             ->orderBy('queue_priority', 'desc')
@@ -300,22 +345,6 @@ class AdminDashboardController extends Controller
                     'priority' => $jobOrder->queue_priority,
                 ];
             });
-
-        return Inertia::render('Dashboard', [
-            'bookingStats' => $bookingStats,
-            'paymentStats' => $paymentStats,
-            'userStats' => $userStats,
-            'recentBookings' => $recentBookings,
-            'topServices' => $topServices,
-            'monthlyRevenue' => $monthlyRevenue,
-            'dailyBookings' => $dailyBookings,
-            'topCustomers' => $topCustomers,
-            'queueData' => $queueData,
-            'filters' => [
-                'start_date' => $startDate,
-                'end_date' => $endDate,
-            ],
-        ]);
     }
 
     public function bookingCalendar(Request $request): Response

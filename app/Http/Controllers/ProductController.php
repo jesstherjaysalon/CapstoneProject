@@ -7,6 +7,7 @@ use App\Models\InventoryCategory;
 use App\Models\StockTransaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class ProductController extends Controller
 {
@@ -25,7 +26,6 @@ class ProductController extends Controller
             'inventory_category_id' => 'required|exists:inventory_categories,id',
             'name' => 'required|string|max:255',
             'unit' => 'required|string|max:50',
-            'current_stock' => 'integer|min:0',
             'reorder_level' => 'integer|min:0',
             'price' => 'nullable|numeric|min:0',
             'description' => 'nullable|string',
@@ -59,7 +59,6 @@ class ProductController extends Controller
             'inventory_category_id' => 'required|exists:inventory_categories,id',
             'name' => 'required|string|max:255',
             'unit' => 'required|string|max:50',
-            'current_stock' => 'integer|min:0',
             'reorder_level' => 'integer|min:0',
             'price' => 'nullable|numeric|min:0',
             'description' => 'nullable|string',
@@ -95,21 +94,31 @@ class ProductController extends Controller
             'remarks' => 'nullable|string',
         ]);
 
-        DB::transaction(function () use ($product, $validated) {
-            $product->increment('current_stock', $validated['quantity']);
+        $receiptId = (string) Str::uuid();
+        $transaction = DB::transaction(function () use ($product, $validated, $receiptId) {
+            $referenceNumber = StockTransaction::nextReceiptReferenceNumber();
 
-            StockTransaction::create([
+            return StockTransaction::create([
                 'product_id' => $product->id,
                 'user_id' => auth()->id(),
                 'transaction_type' => 'IN',
                 'quantity' => $validated['quantity'],
                 'transaction_date' => now(),
-                'remarks' => $validated['remarks'] ?? 'Stock added',
+                'remarks' => $validated['remarks'] ?? 'Stock added through legacy form',
+                'receipt_id' => $receiptId,
+                'supplier_id' => $product->supplier_id,
+                'reference_number' => $referenceNumber,
+                'unit_cost' => 0,
+                'total_cost' => 0,
+                'status' => 'pending',
             ]);
         });
 
-        $product->refresh();
-        return response()->json($product);
+        return response()->json([
+            'product' => $product->fresh(),
+            'transaction' => $transaction,
+            'message' => 'Stock was recorded as a pending receipt and will be added after confirmation.',
+        ], 202);
     }
 
     public function getLowStock()

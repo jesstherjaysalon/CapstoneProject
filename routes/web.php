@@ -16,6 +16,7 @@ use App\Http\Controllers\InventoryCategoryController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\StockTransactionController;
+use App\Http\Controllers\ReceivingController;
 use App\Http\Controllers\ServiceProductUsageController;
 use App\Http\Controllers\ReportsController;
 use App\Http\Controllers\QueueController;
@@ -66,6 +67,7 @@ Route::middleware('auth')->group(function () {
 
 Route::middleware(['auth', 'admin'])->group(function () {
     Route::get('/dashboard', [AdminDashboardController::class, 'index'])->name('dashboard');
+    Route::get('/admin/queue/display', [AdminDashboardController::class, 'queueDisplay'])->name('admin.queue.display');
     Route::get('/admin/booking-calendar', [AdminDashboardController::class, 'bookingCalendar'])->name('admin.booking-calendar');
     
     Route::get('/staff', [StaffController::class, 'index'])->name('staff.index');
@@ -104,8 +106,20 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::put('/admin/queue/{jobOrder}/staff', [QueueController::class, 'updateStaff'])->name('admin.queue.update-staff');
 
     Route::get('/admin/inventory-management', function () {
-        return Inertia::render('Admin/InventoryManagement');
+        return Inertia::render('Admin/InventoryManagement', ['module' => 'overview']);
     })->name('admin.inventory-management.index');
+    Route::get('/admin/inventory/categories', function () {
+        return Inertia::render('Admin/InventoryManagement', ['module' => 'categories']);
+    })->name('admin.inventory.categories');
+    Route::get('/admin/inventory/suppliers', function () {
+        return Inertia::render('Admin/InventoryManagement', ['module' => 'suppliers']);
+    })->name('admin.inventory.suppliers');
+    Route::get('/admin/inventory/products', function () {
+        return Inertia::render('Admin/InventoryManagement', ['module' => 'products']);
+    })->name('admin.inventory.products');
+    Route::get('/admin/inventory/receiving', function () {
+        return Inertia::render('Admin/Receiving');
+    })->name('admin.inventory.receiving');
 
     // Inventory Management Routes
     Route::get('/admin/inventory-categories', [InventoryCategoryController::class, 'index'])->name('admin.inventory-categories.index');
@@ -131,6 +145,9 @@ Route::middleware(['auth', 'admin'])->group(function () {
 
     Route::get('/admin/stock-transactions', [StockTransactionController::class, 'index'])->name('admin.stock-transactions.index');
     Route::get('/admin/stock-transactions/{stockTransaction}', [StockTransactionController::class, 'show'])->name('admin.stock-transactions.show');
+    Route::get('/admin/receivings', [ReceivingController::class, 'index'])->name('admin.receivings.index');
+    Route::post('/admin/receivings', [ReceivingController::class, 'store'])->name('admin.receivings.store');
+    Route::post('/admin/receivings/{receiptId}/confirm', [ReceivingController::class, 'confirm'])->name('admin.receivings.confirm');
 
     Route::get('/admin/service-product-usage', [ServiceProductUsageController::class, 'index'])->name('admin.service-product-usage.index');
     Route::post('/admin/service-product-usage', [ServiceProductUsageController::class, 'store'])->name('admin.service-product-usage.store');

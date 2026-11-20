@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Schedule;
 use App\Models\Booking;
-use App\Models\BookingService;
 use Carbon\Carbon;
 
 class ScheduleController extends Controller
@@ -65,25 +64,15 @@ class ScheduleController extends Controller
             $cursor->addMinutes(30);
         }
 
-        // count bookings for that date
-        $bookingCount = Booking::whereDate('date', $date->toDateString())->count();
+        $bookingCount = Booking::whereDate('date', $date->toDateString())
+            ->whereNotIn('status', ['rejected', 'cancelled'])
+            ->count();
         $maxPerDay = $schedule->max_bookings_per_day ?? null;
 
         // if max per day set and reached, mark all slots unavailable
         $available = [];
         foreach ($slots as $s) {
-            $isAvailable = true;
-            if ($maxPerDay !== null && $bookingCount >= $maxPerDay) {
-                $isAvailable = false;
-            } else {
-                // optional: check bookings at the exact time
-                $slotBookings = BookingService::where('scheduled_time', $s['time'])
-                    ->whereHas('booking', function($q) use ($date) {
-                        $q->whereDate('date', $date->toDateString());
-                    })->count();
-                // assume unlimited per-slot unless you set per-slot limit; keep available if slotBookings is 0
-                if ($slotBookings > 0) $isAvailable = false;
-            }
+            $isAvailable = $maxPerDay === null || $bookingCount < $maxPerDay;
             $available[] = array_merge($s, ['available' => $isAvailable]);
         }
 

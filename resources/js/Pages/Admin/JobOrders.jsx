@@ -301,7 +301,7 @@ export default function JobOrders({ auth, jobOrders, staff, jobOrderSummary }) {
                                                     <button
                                                         onClick={() => handleViewRequests(jobOrder)}
                                                         className="rounded-lg p-2 transition bg-slate-100 text-slate-700 hover:bg-slate-200"
-                                                        title="View Requests"
+                                                        title="View Job Order Details"
                                                     >
                                                         <Eye size={18} />
                                                     </button>
@@ -420,9 +420,9 @@ export default function JobOrders({ auth, jobOrders, staff, jobOrderSummary }) {
                 {/* View Requests Modal */}
                 {isViewRequestsModalOpen && selectedJobOrder && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-                        <div className="rounded-2xl bg-white max-w-lg w-full" style={{ boxShadow: '0 4px 20px rgba(30, 58, 138, 0.15)' }}>
+                        <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white" style={{ boxShadow: '0 4px 20px rgba(30, 58, 138, 0.15)' }}>
                             <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-                                <h2 className="text-lg font-bold text-slate-900">Product Requests</h2>
+                                <h2 className="text-lg font-bold text-slate-900">Job Order Details</h2>
                                 <button
                                     onClick={() => setIsViewRequestsModalOpen(false)}
                                     className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 transition"
@@ -430,11 +430,65 @@ export default function JobOrders({ auth, jobOrders, staff, jobOrderSummary }) {
                                     <X size={20} />
                                 </button>
                             </div>
-                            <div className="p-6">
+                            <div className="space-y-6 overflow-y-auto p-6">
                                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 mb-4">
                                     <p className="text-sm text-slate-600">Job Order: <span className="font-semibold text-slate-900">#{selectedJobOrder.id}</span></p>
                                     <p className="text-sm text-slate-600">Service: <span className="font-semibold text-slate-900">{selectedJobOrder.service?.service_name || 'Unknown'}</span></p>
                                 </div>
+
+                                <section>
+                                    <div className="mb-3 flex items-center justify-between">
+                                        <h3 className="text-base font-semibold text-slate-900">Staff Notes &amp; Photos</h3>
+                                        <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                                            {selectedJobOrder.notes?.length || 0} {selectedJobOrder.notes?.length === 1 ? 'update' : 'updates'}
+                                        </span>
+                                    </div>
+                                    {selectedJobOrder.notes?.length > 0 ? (
+                                        <div className="space-y-3">
+                                            {selectedJobOrder.notes.map((update) => (
+                                                <article key={update.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                                                    {update.note && (
+                                                        <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+                                                            {update.note}
+                                                        </p>
+                                                    )}
+                                                    {update.photos?.length > 0 && (
+                                                        <div className={`grid grid-cols-2 gap-3 sm:grid-cols-3 ${update.note ? 'mt-3' : ''}`}>
+                                                            {update.photos.map((photo) => (
+                                                                <a
+                                                                    key={photo.path}
+                                                                    href={photo.url}
+                                                                    target="_blank"
+                                                                    rel="noreferrer"
+                                                                    className="group overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
+                                                                    title="Open photo in a new tab"
+                                                                >
+                                                                    <img
+                                                                        src={photo.url}
+                                                                        alt={`Job order #${selectedJobOrder.id} update`}
+                                                                        loading="lazy"
+                                                                        className="h-32 w-full object-cover transition group-hover:scale-105"
+                                                                    />
+                                                                </a>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    <p className="mt-3 text-xs text-slate-500">
+                                                        {update.created_at ? new Date(update.created_at).toLocaleString() : 'Date unavailable'}
+                                                    </p>
+                                                </article>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
+                                            <p className="text-sm font-medium text-slate-700">No notes or photos for this job order.</p>
+                                            <p className="mt-1 text-xs text-slate-500">Staff updates will appear here when added.</p>
+                                        </div>
+                                    )}
+                                </section>
+
+                                <section>
+                                    <h3 className="mb-3 text-base font-semibold text-slate-900">Product Requests</h3>
                                 {selectedJobOrder.product_usages && selectedJobOrder.product_usages.length > 0 ? (
                                     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
                                         <div className="overflow-x-auto">
@@ -513,6 +567,7 @@ export default function JobOrders({ auth, jobOrders, staff, jobOrderSummary }) {
                                         </p>
                                     </div>
                                 )}
+                                </section>
                             </div>
                         </div>
                     </div>

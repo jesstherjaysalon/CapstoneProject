@@ -7,6 +7,7 @@ use App\Models\BookingService;
 use App\Models\Category;
 use App\Models\InventoryCategory;
 use App\Models\JobOrder;
+use App\Models\ManualPayment;
 use App\Models\Product;
 use App\Models\Profile;
 use App\Models\Service;
@@ -310,6 +311,27 @@ class InventorySalesTrackingTest extends TestCase
             'id' => $jobOrder->id,
             'status' => 'in_progress',
         ]);
+
+        ServiceProductUsage::where('job_order_id', $jobOrder->id)
+            ->update(['status' => 'Rejected']);
+
+        $apiResponse = $this->actingAs($staff)->putJson('/api/staff/tasks/' . $jobOrder->id, [
+            'status' => 'completed',
+        ]);
+
+        $apiResponse->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.jobOrder.status', 'completed');
+        $this->assertDatabaseHas('job_orders', [
+            'id' => $jobOrder->id,
+            'status' => 'completed',
+        ]);
+
+        $webResponse = $this->actingAs($staff)->from('/staff/tasks')->put('/staff/tasks/' . $jobOrder->id, [
+            'status' => 'completed',
+        ]);
+        $webResponse->assertRedirect('/staff/tasks');
+        $this->assertSessionHas('success', 'Task status updated successfully.');
     }
 
     public function test_consumable_sales_report_includes_customer_and_appointment_context(): void
@@ -403,11 +425,24 @@ class InventorySalesTrackingTest extends TestCase
             'status' => 'Approved',
         ]);
 
+        ManualPayment::create([
+            'booking_id' => $booking->id,
+            'amount' => 500,
+            'receipt_number' => 'REPORT-TEST-001',
+        ]);
+
         $response = $this->actingAs($admin)->getJson('/admin/reports/consumable-product-sales');
 
         $response->assertOk();
         $response->assertJsonFragment(['product_name' => 'Spark Plug']);
         $response->assertJsonFragment(['customer_name' => 'Maria Customer']);
         $response->assertJsonFragment(['staff_name' => 'Alex Staff']);
+
+        $financialResponse = $this->actingAs($admin)->getJson('/admin/reports/financial')->assertOk();
+        $financialReport = $financialResponse->json();
+        $paymentMethods = collect($financialReport['revenue_by_payment_method'])->keyBy('payment_method');
+
+        $this->assertEquals(1050, $financialReport['total_product_sales']);
+        $this->assertEquals(500, $paymentMethods['manual']['total']);
     }
 }

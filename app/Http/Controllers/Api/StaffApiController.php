@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\JobOrder;
+use App\Models\JobOrderNote;
 use App\Models\Product;
 use App\Models\ServiceProductUsage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class StaffApiController extends Controller
@@ -58,7 +60,12 @@ class StaffApiController extends Controller
             ->get()
             ->groupBy('job_order_id');
 
-        $jobOrders = $jobOrders->map(function ($jobOrder) use ($productUsages) {
+        $taskUpdates = JobOrderNote::whereIn('job_order_id', $jobOrderIds)
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->groupBy('job_order_id');
+
+        $jobOrders = $jobOrders->map(function ($jobOrder) use ($productUsages, $taskUpdates) {
             $usages = $productUsages->get($jobOrder->id, collect())->map(function ($usage) {
                 return [
                     'id' => $usage->id,
@@ -74,6 +81,20 @@ class StaffApiController extends Controller
                     'created_at' => $usage->created_at?->format('Y-m-d H:i:s'),
                 ];
             });
+
+            $updates = $taskUpdates->get($jobOrder->id, collect())->map(function ($update) {
+                return [
+                    'id' => $update->id,
+                    'note' => $update->note,
+                    'photos' => collect($update->photos ?? [])->map(function ($path) {
+                        return [
+                            'path' => $path,
+                            'url' => Storage::disk('public')->url($path),
+                        ];
+                    })->values(),
+                    'created_at' => $update->created_at?->format('Y-m-d H:i:s'),
+                ];
+            })->values();
 
             return [
                 'id' => $jobOrder->id,
@@ -96,6 +117,7 @@ class StaffApiController extends Controller
                 'end_time' => $jobOrder->end_time?->format('Y-m-d H:i:s'),
                 'status' => $jobOrder->status,
                 'product_usages' => $usages,
+                'updates' => $updates,
             ];
         });
 
@@ -223,6 +245,7 @@ class StaffApiController extends Controller
 
             $hasOutstandingReturnableUsage = ServiceProductUsage::where('job_order_id', $jobOrder->id)
                 ->whereNull('returned_at')
+                ->where('status', '!=', 'Rejected')
                 ->whereHas('product.inventoryCategory', function ($query) {
                     $query->where('is_asset', true);
                 })
@@ -320,5 +343,74 @@ class StaffApiController extends Controller
                 'image_path' => $path,
             ],
         ]);
+    }
+
+    /**
+     * Save a staff note and optional supporting photos for a job order.
+     */
+    public function storeTaskUpdate(Request $request, JobOrder $jobOrder)
+    {
+        $validated = $request->validate([
+            'note' => ['nullable', 'string', 'max:5000'],
+            'photos' => ['sometimes', 'array', 'min:1', 'max:10'],
+            'photos.*' => ['image', 'max:10240'],
+        ]);
+
+        $staff = Auth::user()->profile;
+        if (! in_array($staff->id, $jobOrder->profile_id ?? [])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized action.',
+            ], 403);
+        }
+
+        $note = trim($validated['note'] ?? '');
+        $photos = $request->file('photos', []);
+        if ($note === '' && count($photos) === 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Add a note or select at least one photo.',
+            ], 422);
+        }
+
+        $storedPaths = [];
+        try {
+            foreach ($photos as $photo) {
+                $path = $photo->store('task-update-photos', 'public');
+                if ($path === false) {
+                    throw new \RuntimeException('Unable to store a task update photo.');
+                }
+                $storedPaths[] = $path;
+            }
+
+            $update = DB::transaction(function () use ($jobOrder, $note, $storedPaths) {
+                return JobOrderNote::create([
+                    'job_order_id' => $jobOrder->id,
+                    'note' => $note !== '' ? $note : null,
+                    'photos' => $storedPaths,
+                ]);
+            });
+        } catch (\Throwable $error) {
+            Storage::disk('public')->delete($storedPaths);
+            throw $error;
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Task update saved successfully.',
+            'data' => [
+                'update' => [
+                    'id' => $update->id,
+                    'note' => $update->note,
+                    'photos' => collect($update->photos)->map(function ($path) {
+                        return [
+                            'path' => $path,
+                            'url' => Storage::disk('public')->url($path),
+                        ];
+                    })->values(),
+                    'created_at' => $update->created_at?->format('Y-m-d H:i:s'),
+                ],
+            ],
+        ], 201);
     }
 }

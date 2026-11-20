@@ -70,6 +70,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/bookings/completed', [BookingController::class, 'completed']);
     Route::get('/bookings/{bookingId}/product-usage', [BookingController::class, 'productUsage']);
     Route::post('/bookings/{bookingId}/rate', [BookingController::class, 'rate']);
+    Route::post('/bookings/{bookingId}/cancel', [BookingController::class, 'cancel']);
     Route::post('/bookings', [BookingController::class, 'store']);
     Route::post('/bookings/cash', [BookingController::class, 'cash']);
     Route::get('/bookings/completed-services', [BookingController::class, 'completedServices']);
@@ -89,6 +90,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/staff/service-assignments', [StaffApiController::class, 'serviceAssignments']);
     Route::put('/staff/tasks/{jobOrder}', [StaffApiController::class, 'updateTaskStatus']);
     Route::post('/staff/tasks/{jobOrder}/upload-image', [StaffApiController::class, 'uploadCompletionImage']);
+    Route::post('/staff/tasks/{jobOrder}/updates', [StaffApiController::class, 'storeTaskUpdate']);
     Route::post('/staff/service-product-usage', [ServiceProductUsageController::class, 'store']);
     Route::post('/staff/service-product-usage/{serviceProductUsage}/return', [ServiceProductUsageController::class, 'return']);
 });

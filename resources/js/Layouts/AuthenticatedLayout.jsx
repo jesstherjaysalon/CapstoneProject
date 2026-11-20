@@ -19,6 +19,8 @@ import {
     CalendarDays,
     ClipboardList,
     Package,
+    Truck,
+    Box,
     AlertTriangle,
     BarChart3,
     ListOrdered,
@@ -141,7 +143,7 @@ export default function Authenticated({ user, header, children, hideLayout = fal
                 </div>
 
                 {/* MENU */}
-                <nav className="flex-1 flex flex-col gap-1 px-2 py-4">
+                <nav className="min-h-0 flex-1 flex flex-col gap-1 overflow-y-auto overscroll-contain px-2 py-4">
 
                     {/* CATEGORY: MAIN */}
                     {sidebarOpen && (
@@ -320,13 +322,36 @@ export default function Authenticated({ user, header, children, hideLayout = fal
 
                                 {sidebarOpen && (
                                     <span className="text-sm font-medium">
-                                        Inventory Management
+                                        Inventory Overview
                                     </span>
                                 )}
                                 {sidebarOpen && lowStockCount > 0 && (
                                     <AlertTriangle className="ml-auto text-rose-400 animate-pulse" size={16} />
                                 )}
                             </NavLink>
+                            {sidebarOpen && (
+                                <div className="ml-6 mt-1 flex flex-col gap-1">
+                                    {[
+                                        { name: 'Categories', route: 'admin.inventory.categories', icon: Package },
+                                        { name: 'Suppliers', route: 'admin.inventory.suppliers', icon: Truck },
+                                        { name: 'Products', route: 'admin.inventory.products', icon: Box },
+                                        { name: 'Receiving', route: 'admin.inventory.receiving', icon: ClipboardList },
+                                    ].map((item) => {
+                                        const Icon = item.icon;
+                                        return (
+                                            <NavLink
+                                                key={item.route}
+                                                href={route(item.route)}
+                                                active={route().current(item.route)}
+                                                className="flex items-center gap-3 px-3 py-2 rounded-lg text-white hover:bg-white/10 hover:text-white transition"
+                                            >
+                                                <Icon size={18} />
+                                                <span className="text-sm">{item.name}</span>
+                                            </NavLink>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </>
                     )}
 

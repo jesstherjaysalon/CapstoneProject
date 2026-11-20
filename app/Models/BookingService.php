@@ -42,6 +42,10 @@ class BookingService extends Model
             return;
         }
 
+        if ($booking->status === 'cancelled') {
+            return;
+        }
+
         // Check if all booking_services for this booking are completed
         $allServicesCompleted = $booking->services()
             ->where('status', '!=', 'completed')

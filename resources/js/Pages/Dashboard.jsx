@@ -1,6 +1,6 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, router } from '@inertiajs/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   TrendingUp, Users, Calendar, DollarSign,
   CheckCircle, Clock, AlertCircle, Car,
@@ -10,10 +10,52 @@ import {
   Maximize, Minimize
 } from 'lucide-react';
 
-export default function Dashboard({ auth, bookingStats, paymentStats, userStats, recentBookings, topServices, monthlyRevenue, dailyBookings, topCustomers, queueData, filters }) {
+export default function Dashboard({ auth, bookingStats, paymentStats, userStats, recentBookings, topServices, monthlyRevenue, dailyBookings, topCustomers, queueData: initialQueueData, filters }) {
     const [startDate, setStartDate] = useState(filters?.start_date || '');
     const [endDate, setEndDate] = useState(filters?.end_date || '');
     const [isQueueFullscreen, setIsQueueFullscreen] = useState(false);
+    const [queueData, setQueueData] = useState(initialQueueData || []);
+
+    useEffect(() => {
+        let isMounted = true;
+        let timeoutId;
+
+        const refreshQueue = async () => {
+            try {
+                const response = await fetch(route('admin.queue.display'), {
+                    headers: { Accept: 'application/json' },
+                    cache: 'no-store',
+                });
+                if (!response.ok) {
+                    throw new Error(`Queue refresh failed with status ${response.status}`);
+                }
+
+                const updatedQueue = await response.json();
+                if (!Array.isArray(updatedQueue)) {
+                    throw new Error('Queue refresh returned invalid data');
+                }
+
+                if (isMounted) {
+                    setQueueData(updatedQueue);
+                }
+            } catch (error) {
+                if (isMounted) {
+                    console.error('Unable to refresh queue display:', error);
+                }
+            } finally {
+                if (isMounted) {
+                    timeoutId = window.setTimeout(refreshQueue, 5000);
+                }
+            }
+        };
+
+        refreshQueue();
+
+        return () => {
+            isMounted = false;
+            window.clearTimeout(timeoutId);
+        };
+    }, []);
 
     const toggleQueueFullscreen = () => {
         setIsQueueFullscreen(!isQueueFullscreen);
@@ -101,7 +143,7 @@ export default function Dashboard({ auth, bookingStats, paymentStats, userStats,
                 <div className="flex-1">
                     <p className="text-sm font-medium text-slate-500 mb-1">{title}</p>
                     <h3 className="text-3xl font-bold text-slate-900 mb-1">{value}</h3>
-                    <p className="text-xs text-slate-500">{subtitle}</p>
+                    {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
                 </div>
                 <div className={`p-3 rounded-xl ${color} group-hover:scale-110 transition-transform duration-300`}>
                     <Icon size={24} className="text-white" />
@@ -198,7 +240,6 @@ export default function Dashboard({ auth, bookingStats, paymentStats, userStats,
                     <StatCard
                         title="Total Revenue"
                         value={formatCurrency(paymentStats.total_revenue)}
-                        subtitle={`${paymentStats.paid_payments} paid payments`}
                         icon={TrendingUp}
                         color="bg-gradient-to-br from-emerald-500 to-emerald-600"
                         trend="Total revenue"

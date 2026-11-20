@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Head, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -15,6 +15,26 @@ const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-US
 const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+};
+
+const formatOverviewDate = (dateString, options) => {
+    if (!dateString) return '—';
+    return new Date(`${dateString}T00:00:00`).toLocaleDateString('en-US', options);
+};
+
+const bookingStatusColors = {
+    accepted: '#10B981',
+    cancelled: '#EF4444',
+    completed: '#0D2A94',
+    pending: '#F59E0B',
+    rejected: '#9CA3AF',
+};
+const bookingStatusClasses = {
+    accepted: 'bg-emerald-50 text-emerald-700',
+    cancelled: 'bg-red-50 text-red-700',
+    completed: 'bg-blue-50 text-blue-700',
+    pending: 'bg-amber-50 text-amber-700',
+    rejected: 'bg-gray-100 text-gray-700',
 };
 
 // Star rating component
@@ -47,6 +67,8 @@ export default function Reports() {
     const [financialStartDate, setFinancialStartDate] = useState('');
     const [financialEndDate, setFinancialEndDate] = useState('');
     const [filterError, setFilterError] = useState('');
+    const [jobOrderSalesPage, setJobOrderSalesPage] = useState(1);
+    const [customerSalesPage, setCustomerSalesPage] = useState(1);
     const requestControllers = useRef({});
     const [data, setData] = useState({
         overview: null,
@@ -54,8 +76,6 @@ export default function Reports() {
         consumableProductSales: null,
         jobOrders: null,
         inventory: null,
-        customers: null,
-        staff: null,
     });
 
     useEffect(() => {
@@ -146,14 +166,6 @@ export default function Reports() {
         await requestReport('inventory', '/admin/reports/inventory');
     };
 
-    const fetchCustomersData = async () => {
-        await requestReport('customers', '/admin/reports/customers');
-    };
-
-    const fetchStaffData = async () => {
-        await requestReport('staff', '/admin/reports/staff');
-    };
-
     const handleTabChange = (tab) => {
         setActiveTab(tab);
         switch (tab) {
@@ -167,12 +179,6 @@ export default function Reports() {
             case 'inventory':
                 if (!data.inventory) fetchInventoryData();
                 break;
-            case 'customers':
-                if (!data.customers) fetchCustomersData();
-                break;
-            case 'staff':
-                if (!data.staff) fetchStaffData();
-                break;
         }
     };
 
@@ -181,8 +187,6 @@ export default function Reports() {
         { id: 'financial', label: 'Financial', icon: Banknote },
         { id: 'jobOrders', label: 'Job Orders', icon: ClipboardList },
         { id: 'inventory', label: 'Inventory', icon: Package },
-        { id: 'customers', label: 'Customers', icon: Users },
-        { id: 'staff', label: 'Staff', icon: Users },
     ];
     const activeRequestKeys = activeTab === 'financial'
         ? ['financial', 'consumableProductSales']
@@ -190,6 +194,60 @@ export default function Reports() {
     const activeDataKey = activeTab === 'jobOrders' ? 'jobOrders' : activeTab;
     const activeLoading = activeRequestKeys.some(key => loadingSections[key]);
     const activeErrors = activeRequestKeys.filter(key => requestErrors[key]);
+    const jobOrderSales = data.jobOrders?.job_order_history || [];
+    const jobOrderSalesTotals = jobOrderSales.reduce((totals, jobOrder) => ({
+        service: totals.service + Number(jobOrder.service_sales || 0),
+        products: totals.products + Number(jobOrder.product_sales || 0),
+        total: totals.total + Number(jobOrder.total_sales || 0),
+    }), { service: 0, products: 0, total: 0 });
+    const jobOrderSalesPageSize = 10;
+    const jobOrderSalesPageCount = Math.max(1, Math.ceil(jobOrderSales.length / jobOrderSalesPageSize));
+    const currentJobOrderSalesPage = Math.min(jobOrderSalesPage, jobOrderSalesPageCount);
+    const visibleJobOrderSales = jobOrderSales.slice(
+        (currentJobOrderSalesPage - 1) * jobOrderSalesPageSize,
+        currentJobOrderSalesPage * jobOrderSalesPageSize
+    );
+    const customerSales = useMemo(() => {
+        const salesByCustomer = new Map();
+
+        jobOrderSales.forEach((jobOrder) => {
+            if (Number(jobOrder.total_sales || 0) <= 0) return;
+
+            const customerKey = jobOrder.customer_id
+                ? `profile-${jobOrder.customer_id}`
+                : `booking-${jobOrder.booking_id || jobOrder.id}`;
+            const customer = salesByCustomer.get(customerKey) || {
+                id: customerKey,
+                name: jobOrder.customer_name || 'Guest Customer',
+                job_orders: 0,
+                service_sales: 0,
+                product_sales: 0,
+                total_sales: 0,
+            };
+
+            customer.job_orders += 1;
+            customer.service_sales += Number(jobOrder.service_sales || 0);
+            customer.product_sales += Number(jobOrder.product_sales || 0);
+            customer.total_sales += Number(jobOrder.total_sales || 0);
+            salesByCustomer.set(customerKey, customer);
+        });
+
+        return Array.from(salesByCustomer.values())
+            .sort((left, right) => right.total_sales - left.total_sales);
+    }, [jobOrderSales]);
+    const customerSalesTotals = customerSales.reduce((totals, customer) => ({
+        jobs: totals.jobs + customer.job_orders,
+        service: totals.service + customer.service_sales,
+        products: totals.products + customer.product_sales,
+        total: totals.total + customer.total_sales,
+    }), { jobs: 0, service: 0, products: 0, total: 0 });
+    const customerSalesPageSize = 10;
+    const customerSalesPageCount = Math.max(1, Math.ceil(customerSales.length / customerSalesPageSize));
+    const currentCustomerSalesPage = Math.min(customerSalesPage, customerSalesPageCount);
+    const visibleCustomerSales = customerSales.slice(
+        (currentCustomerSalesPage - 1) * customerSalesPageSize,
+        currentCustomerSalesPage * customerSalesPageSize
+    );
 
     return (
         <AuthenticatedLayout user={auth?.user} header="Reports">
@@ -277,7 +335,7 @@ export default function Reports() {
                                     />
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <StatCard
                                         title="Pending Bookings"
                                         value={data.overview.pending_bookings}
@@ -290,6 +348,150 @@ export default function Reports() {
                                         icon={Package}
                                         color="red"
                                     />
+                                    <StatCard
+                                        title="Cancellation Fees"
+                                        value={formatCurrency(data.overview.total_cancellation_fees)}
+                                        icon={Banknote}
+                                        color="yellow"
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                                    <div className="lg:col-span-3">
+                                        <ChartCard title="Booking Activity" description="Bookings created over the last seven days.">
+                                            {data.overview.booking_trend?.length ? (
+                                                <ResponsiveContainer width="100%" height={280}>
+                                                    <LineChart data={data.overview.booking_trend} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                                                        <CartesianGrid stroke="#E5E7EB" strokeDasharray="3 3" vertical={false} />
+                                                        <XAxis
+                                                            dataKey="date"
+                                                            tickFormatter={(date) => formatOverviewDate(date, { weekday: 'short' })}
+                                                            tickLine={false}
+                                                            axisLine={false}
+                                                            tick={{ fill: '#6B7280', fontSize: 12 }}
+                                                        />
+                                                        <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: '#6B7280', fontSize: 12 }} />
+                                                        <Tooltip
+                                                            labelFormatter={(date) => formatOverviewDate(date, { month: 'short', day: 'numeric' })}
+                                                            contentStyle={{ borderRadius: 10, borderColor: '#E5E7EB' }}
+                                                        />
+                                                        <Line
+                                                            type="monotone"
+                                                            dataKey="bookings"
+                                                            name="Bookings"
+                                                            stroke="#0D2A94"
+                                                            strokeWidth={3}
+                                                            dot={{ r: 4, fill: '#0D2A94', strokeWidth: 0 }}
+                                                            activeDot={{ r: 6 }}
+                                                        />
+                                                    </LineChart>
+                                                </ResponsiveContainer>
+                                            ) : <EmptyState message="No booking activity is available." />}
+                                        </ChartCard>
+                                    </div>
+                                    <div className="lg:col-span-2">
+                                        <ChartCard title="Booking Status" description="Current distribution across all bookings.">
+                                            {data.overview.booking_status_distribution?.length ? (
+                                                <ResponsiveContainer width="100%" height={280}>
+                                                    <PieChart>
+                                                        <Pie
+                                                            data={data.overview.booking_status_distribution}
+                                                            dataKey="total"
+                                                            nameKey="status"
+                                                            innerRadius={62}
+                                                            outerRadius={92}
+                                                            paddingAngle={3}
+                                                        >
+                                                            {data.overview.booking_status_distribution.map((entry, index) => (
+                                                                <Cell
+                                                                    key={entry.status}
+                                                                    fill={bookingStatusColors[entry.status] || COLORS[index % COLORS.length]}
+                                                                />
+                                                            ))}
+                                                        </Pie>
+                                                        <Tooltip
+                                                            formatter={(value, name) => [value, `${name.charAt(0).toUpperCase()}${name.slice(1)}`]}
+                                                            contentStyle={{ borderRadius: 10, borderColor: '#E5E7EB' }}
+                                                        />
+                                                        <Legend
+                                                            verticalAlign="bottom"
+                                                            formatter={(value) => `${value.charAt(0).toUpperCase()}${value.slice(1)}`}
+                                                        />
+                                                    </PieChart>
+                                                </ResponsiveContainer>
+                                            ) : <EmptyState message="No booking status data is available." />}
+                                        </ChartCard>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                                    <section className="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm lg:col-span-2">
+                                        <div className="border-b border-gray-100 px-5 py-4">
+                                            <h3 className="text-base font-semibold text-gray-900">Recent Bookings</h3>
+                                            <p className="mt-1 text-sm text-gray-500">The latest bookings added to the system.</p>
+                                        </div>
+                                        {data.overview.recent_bookings?.length ? (
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-left text-sm">
+                                                    <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                                                        <tr>
+                                                            <th className="px-5 py-3 font-semibold">Booking</th>
+                                                            <th className="px-5 py-3 font-semibold">Customer</th>
+                                                            <th className="px-5 py-3 font-semibold">Services</th>
+                                                            <th className="px-5 py-3 font-semibold">Date</th>
+                                                            <th className="px-5 py-3 font-semibold">Status</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-gray-100">
+                                                        {data.overview.recent_bookings.map((booking) => (
+                                                            <tr key={booking.id} className="hover:bg-gray-50">
+                                                                <td className="whitespace-nowrap px-5 py-3 font-semibold text-gray-700">#{booking.id}</td>
+                                                                <td className="whitespace-nowrap px-5 py-3 text-gray-800">{booking.customer_name}</td>
+                                                                <td className="max-w-[220px] px-5 py-3 text-gray-600">{booking.services}</td>
+                                                                <td className="whitespace-nowrap px-5 py-3 text-gray-600">
+                                                                    {formatOverviewDate(booking.date, { month: 'short', day: 'numeric' })}
+                                                                </td>
+                                                                <td className="whitespace-nowrap px-5 py-3">
+                                                                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${bookingStatusClasses[booking.status] || 'bg-gray-100 text-gray-700'}`}>
+                                                                        {booking.status}
+                                                                    </span>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        ) : <div className="p-5"><EmptyState message="No recent bookings are available." /></div>}
+                                    </section>
+
+                                    <section className="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+                                        <div className="border-b border-gray-100 px-5 py-4">
+                                            <h3 className="text-base font-semibold text-gray-900">Top Services</h3>
+                                            <p className="mt-1 text-sm text-gray-500">Most frequently booked services.</p>
+                                        </div>
+                                        {data.overview.top_services?.length ? (
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-left text-sm">
+                                                    <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                                                        <tr>
+                                                            <th className="px-5 py-3 font-semibold">Service</th>
+                                                            <th className="px-5 py-3 text-right font-semibold">Bookings</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-gray-100">
+                                                        {data.overview.top_services.map((service, index) => (
+                                                            <tr key={`${service.name}-${index}`} className="hover:bg-gray-50">
+                                                                <td className="px-5 py-3 font-medium text-gray-800">{service.name}</td>
+                                                                <td className="whitespace-nowrap px-5 py-3 text-right font-semibold tabular-nums text-gray-700">
+                                                                    {service.bookings}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        ) : <div className="p-5"><EmptyState message="No service booking data is available." /></div>}
+                                    </section>
                                 </div>
                             </>
                         ) : !requestErrors.overview ? (
@@ -349,7 +551,7 @@ export default function Reports() {
 
                         {data.financial && (
                             <>
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
                                     <StatCard
                                         title="Total Daily Revenue"
                                         value={formatCurrency(data.financial.total_daily_revenue)}
@@ -367,6 +569,12 @@ export default function Reports() {
                                         value={formatCurrency(data.financial.total_revenue_by_service)}
                                         icon={ClipboardList}
                                         color="purple"
+                                    />
+                                    <StatCard
+                                        title="Cancellation Fees"
+                                        value={formatCurrency(data.financial.total_cancellation_fees)}
+                                        icon={Banknote}
+                                        color="yellow"
                                     />
                                     <StatCard
                                         title="Total Unpaid Balance"
@@ -412,7 +620,7 @@ export default function Reports() {
                                     )}
                                 </div>
 
-                                <ChartCard title="Daily Revenue Trend: Service Revenue vs Product Sales">
+                                <ChartCard title="Daily Revenue Trend: Services, Products, and Cancellation Fees">
                                     {Array.isArray(data.financial.daily_revenue) && data.financial.daily_revenue?.length > 0 ? (
                                         <ResponsiveContainer width="100%" height={300}>
                                             <LineChart data={data.financial.daily_revenue}>
@@ -423,6 +631,7 @@ export default function Reports() {
                                                 <Legend />
                                                 <Line type="monotone" dataKey="service_total" stroke="#0D2A94" strokeWidth={2} name="Total Revenue by Service" />
                                                 <Line type="monotone" dataKey="product_total" stroke="#10B981" strokeWidth={2} name="Total Product Sales" />
+                                                <Line type="monotone" dataKey="cancellation_fee_total" stroke="#F59E0B" strokeWidth={2} name="Cancellation Fees" />
                                             </LineChart>
                                         </ResponsiveContainer>
                                     ) : (
@@ -503,14 +712,14 @@ export default function Reports() {
                                 <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
                                     <div className="mb-4">
                                         <h3 className="text-lg font-semibold text-gray-900">Detailed Financial Report</h3>
-                                        <p className="text-sm text-gray-500">A summary of online and manual payments and product sales for the selected period.</p>
+                                        <p className="text-sm text-gray-500">Cancelled bookings contribute only their cancellation fee; their original payments are excluded from sales.</p>
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
                                         <div className="rounded-xl bg-blue-50 p-4">
                                             <p className="text-sm text-blue-700">Online Revenue</p>
                                             <p className="mt-2 text-2xl font-bold text-blue-900">
-                                                {formatCurrency(data.financial.revenue_by_payment_method?.filter(item => item.payment_method !== 'manual' && item.payment_method !== 'cash' && item.payment_method !== 'walkin')
+                                                {formatCurrency(data.financial.revenue_by_payment_method?.filter(item => item.payment_method !== 'manual' && item.payment_method !== 'cash' && item.payment_method !== 'walkin' && item.payment_method !== 'cancellation fee')
                                                     .reduce((sum, item) => sum + Number(item.total || 0), 0))}
                                             </p>
                                         </div>
@@ -525,6 +734,12 @@ export default function Reports() {
                                             <p className="text-sm text-amber-700">Product Revenue</p>
                                             <p className="mt-2 text-2xl font-bold text-amber-900">
                                                 {formatCurrency(data.financial.total_product_sales)}
+                                            </p>
+                                        </div>
+                                        <div className="rounded-xl bg-yellow-50 p-4">
+                                            <p className="text-sm text-yellow-700">Cancellation Fees</p>
+                                            <p className="mt-2 text-2xl font-bold text-yellow-900">
+                                                {formatCurrency(data.financial.total_cancellation_fees)}
                                             </p>
                                         </div>
                                     </div>
@@ -649,41 +864,88 @@ export default function Reports() {
                             )}
                         </ChartCard>
 
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                            <StatCard
+                                title="Service Sales"
+                                value={formatCurrency(jobOrderSalesTotals.service)}
+                                icon={ClipboardList}
+                                color="purple"
+                            />
+                            <StatCard
+                                title="Product Sales"
+                                value={formatCurrency(jobOrderSalesTotals.products)}
+                                icon={Package}
+                                color="green"
+                            />
+                            <StatCard
+                                title="Total Job Order Sales"
+                                value={formatCurrency(jobOrderSalesTotals.total)}
+                                icon={Banknote}
+                                color="blue"
+                            />
+                        </div>
+
                         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
                             <div className="mb-4">
-                                <h3 className="text-lg font-semibold text-gray-900">Job Order History</h3>
-                                <p className="text-sm text-gray-500">Complete job order history, including the vehicle booked for each service.</p>
+                                <h3 className="text-lg font-semibold text-gray-900">Detailed Job Order Sales</h3>
+                                <p className="text-sm text-gray-500">Sales per job order include the service price and approved product usage. Rejected and cancelled bookings show zero sales.</p>
                             </div>
 
-                            {data.jobOrders.job_order_history?.length > 0 ? (
+                            {jobOrderSales.length > 0 ? (
                                 <div className="overflow-x-auto">
-                                    <table className="w-full min-w-[900px] text-left text-sm">
+                                    <table className="w-full min-w-[1450px] text-left text-sm">
                                         <thead>
                                             <tr className="border-b border-gray-200 bg-gray-50">
                                                 <th className="px-4 py-3 font-semibold text-gray-700">Job Order</th>
                                                 <th className="px-4 py-3 font-semibold text-gray-700">Booking</th>
                                                 <th className="px-4 py-3 font-semibold text-gray-700">Service</th>
-                                                <th className="px-4 py-3 font-semibold text-gray-700">Customer</th>
-                                                <th className="px-4 py-3 font-semibold text-gray-700">Vehicle</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Customer / Vehicle</th>
                                                 <th className="px-4 py-3 font-semibold text-gray-700">Staff</th>
                                                 <th className="px-4 py-3 font-semibold text-gray-700">Date</th>
+                                                <th className="px-4 py-3 font-semibold text-gray-700">Approved Products</th>
+                                                <th className="px-4 py-3 text-right font-semibold text-gray-700">Service Sales</th>
+                                                <th className="px-4 py-3 text-right font-semibold text-gray-700">Product Sales</th>
+                                                <th className="px-4 py-3 text-right font-semibold text-gray-700">Total Sales</th>
                                                 <th className="px-4 py-3 font-semibold text-gray-700">Status</th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {data.jobOrders.job_order_history.map((jobOrder) => (
+                                            {visibleJobOrderSales.map((jobOrder) => (
                                                 <tr key={jobOrder.id} className="border-b border-gray-100">
                                                     <td className="px-4 py-3 font-medium text-gray-800">#{jobOrder.id}</td>
                                                     <td className="px-4 py-3 text-gray-700">{jobOrder.booking_id ? `#${jobOrder.booking_id}` : '-'}</td>
                                                     <td className="px-4 py-3 text-gray-700">{jobOrder.service_name || 'Unknown service'}</td>
-                                                    <td className="px-4 py-3 text-gray-700">{jobOrder.customer_name || 'Unknown customer'}</td>
                                                     <td className="px-4 py-3 text-gray-700">
-                                                        {jobOrder.vehicle
-                                                            ? `${jobOrder.vehicle.brand || ''} ${jobOrder.vehicle.model || ''} • ${jobOrder.vehicle.plate_number || 'No plate'}`.trim()
-                                                            : 'No vehicle'}
+                                                        <div className="font-medium">{jobOrder.customer_name || 'Unknown customer'}</div>
+                                                        <div className="mt-1 text-xs text-gray-500">
+                                                            {jobOrder.vehicle
+                                                                ? `${jobOrder.vehicle.brand || ''} ${jobOrder.vehicle.model || ''} • ${jobOrder.vehicle.plate_number || 'No plate'}`.trim()
+                                                                : 'No vehicle'}
+                                                        </div>
                                                     </td>
                                                     <td className="px-4 py-3 text-gray-700">{jobOrder.staff_name || 'Unassigned'}</td>
                                                     <td className="px-4 py-3 text-gray-700">{jobOrder.booking_date || '-'}</td>
+                                                    <td className="px-4 py-3 text-gray-700">
+                                                        {jobOrder.sales_excluded ? (
+                                                            <span className="text-gray-400">Excluded ({jobOrder.booking_status})</span>
+                                                        ) : jobOrder.products?.length ? (
+                                                            <ul className="space-y-1">
+                                                                {jobOrder.products.map((product, index) => (
+                                                                    <li key={`${product.name}-${index}`} className="whitespace-nowrap">
+                                                                        <span className="font-medium">{product.name}</span>
+                                                                        <div className="text-xs text-gray-500">
+                                                                            {product.quantity} {product.unit} × {formatCurrency(product.unit_price)} = {formatCurrency(product.total_sales)}
+                                                                        </div>
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        ) : (
+                                                            <span className="text-gray-400">No approved products</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(jobOrder.service_sales)}</td>
+                                                    <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(jobOrder.product_sales)}</td>
+                                                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatCurrency(jobOrder.total_sales)}</td>
                                                     <td className="px-4 py-3">
                                                         <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-700 capitalize">
                                                             {jobOrder.status?.replace('_', ' ') || 'Unknown'}
@@ -692,12 +954,125 @@ export default function Reports() {
                                                 </tr>
                                             ))}
                                         </tbody>
+                                        <tfoot>
+                                            <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold">
+                                                <td colSpan={7} className="px-4 py-3 text-gray-800">Total</td>
+                                                <td className="px-4 py-3 text-right text-gray-800">{formatCurrency(jobOrderSalesTotals.service)}</td>
+                                                <td className="px-4 py-3 text-right text-gray-800">{formatCurrency(jobOrderSalesTotals.products)}</td>
+                                                <td className="px-4 py-3 text-right text-gray-900">{formatCurrency(jobOrderSalesTotals.total)}</td>
+                                                <td />
+                                            </tr>
+                                        </tfoot>
                                     </table>
                                 </div>
                             ) : (
                                 <div className="flex items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 py-8 text-gray-500">
-                                    No job order history found.
+                                    No job order sales data is available.
                                 </div>
+                            )}
+                            {jobOrderSales.length > 0 && (
+                                <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                                    <p className="text-sm text-gray-500">
+                                        Showing {(currentJobOrderSalesPage - 1) * jobOrderSalesPageSize + 1}
+                                        {' '}to {Math.min(currentJobOrderSalesPage * jobOrderSalesPageSize, jobOrderSales.length)}
+                                        {' '}of {jobOrderSales.length} job orders
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setJobOrderSalesPage(currentJobOrderSalesPage - 1)}
+                                            disabled={currentJobOrderSalesPage === 1}
+                                            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            Previous
+                                        </button>
+                                        <span className="px-2 text-sm text-gray-600">
+                                            Page {currentJobOrderSalesPage} of {jobOrderSalesPageCount}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setJobOrderSalesPage(currentJobOrderSalesPage + 1)}
+                                            disabled={currentJobOrderSalesPage === jobOrderSalesPageCount}
+                                            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            Next
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                            <div className="mb-4">
+                                <h3 className="text-lg font-semibold text-gray-900">Sales by Customer</h3>
+                                <p className="text-sm text-gray-500">Customer sales are grouped across job orders and sorted by total sales.</p>
+                            </div>
+                            {customerSales.length > 0 ? (
+                                <>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full min-w-[760px] text-left text-sm">
+                                            <thead>
+                                                <tr className="border-b border-gray-200 bg-gray-50">
+                                                    <th className="px-4 py-3 font-semibold text-gray-700">Customer</th>
+                                                    <th className="px-4 py-3 text-right font-semibold text-gray-700">Job Orders</th>
+                                                    <th className="px-4 py-3 text-right font-semibold text-gray-700">Service Sales</th>
+                                                    <th className="px-4 py-3 text-right font-semibold text-gray-700">Product Sales</th>
+                                                    <th className="px-4 py-3 text-right font-semibold text-gray-700">Total Sales</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {visibleCustomerSales.map((customer) => (
+                                                    <tr key={customer.id} className="border-b border-gray-100">
+                                                        <td className="px-4 py-3 font-medium text-gray-800">{customer.name}</td>
+                                                        <td className="px-4 py-3 text-right text-gray-700">{customer.job_orders}</td>
+                                                        <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(customer.service_sales)}</td>
+                                                        <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(customer.product_sales)}</td>
+                                                        <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatCurrency(customer.total_sales)}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                            <tfoot>
+                                                <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold">
+                                                    <td className="px-4 py-3 text-gray-800">All Customers</td>
+                                                    <td className="px-4 py-3 text-right text-gray-800">{customerSalesTotals.jobs}</td>
+                                                    <td className="px-4 py-3 text-right text-gray-800">{formatCurrency(customerSalesTotals.service)}</td>
+                                                    <td className="px-4 py-3 text-right text-gray-800">{formatCurrency(customerSalesTotals.products)}</td>
+                                                    <td className="px-4 py-3 text-right text-gray-900">{formatCurrency(customerSalesTotals.total)}</td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                    <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                                        <p className="text-sm text-gray-500">
+                                            Showing {(currentCustomerSalesPage - 1) * customerSalesPageSize + 1}
+                                            {' '}to {Math.min(currentCustomerSalesPage * customerSalesPageSize, customerSales.length)}
+                                            {' '}of {customerSales.length} customers
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setCustomerSalesPage(currentCustomerSalesPage - 1)}
+                                                disabled={currentCustomerSalesPage === 1}
+                                                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                Previous
+                                            </button>
+                                            <span className="px-2 text-sm text-gray-600">
+                                                Page {currentCustomerSalesPage} of {customerSalesPageCount}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setCustomerSalesPage(currentCustomerSalesPage + 1)}
+                                                disabled={currentCustomerSalesPage === customerSalesPageCount}
+                                                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                Next
+                                            </button>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <EmptyState message="No customer sales data is available." />
                             )}
                         </div>
                     </div>
@@ -767,117 +1142,6 @@ export default function Reports() {
                     </div>
                 )}
 
-                {/* Customers Tab */}
-                {activeTab === 'customers' && data.customers && (
-                    <div className="space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <StatCard
-                                title="Total Customers"
-                                value={data.customers.total_customers}
-                                icon={Users}
-                                color="blue"
-                            />
-                            <StatCard
-                                title="Repeat Customer Rate"
-                                value={`${data.customers.repeat_customer_rate}%`}
-                                icon={TrendingUp}
-                                color="green"
-                            />
-                        </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <ChartCard title="Customer Registrations">
-                                {data.customers.customer_registrations?.length ? <ResponsiveContainer width="100%" height={300}>
-                                    <LineChart data={data.customers.customer_registrations}>
-                                        <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis dataKey="date" tickFormatter={formatDate} />
-                                        <YAxis />
-                                        <Tooltip labelFormatter={formatDate} />
-                                        <Line type="monotone" dataKey="count" stroke="#0D2A94" strokeWidth={2} />
-                                    </LineChart>
-                                </ResponsiveContainer> : <EmptyState message="No customer registration data available." />}
-                            </ChartCard>
-
-                            <ChartCard title="Vehicle Distribution">
-                                {data.customers.vehicle_distribution?.length ? <ResponsiveContainer width="100%" height={300}>
-                                    <PieChart>
-                                        <Pie
-                                            data={data.customers.vehicle_distribution}
-                                            cx="50%"
-                                            cy="50%"
-                                            labelLine={false}
-                                            label={({ brand, percent }) => `${brand}: ${(percent * 100).toFixed(0)}%`}
-                                            outerRadius={80}
-                                            fill="#8884d8"
-                                            dataKey="count"
-                                        >
-                                            {data.customers.vehicle_distribution?.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip />
-                                    </PieChart>
-                                </ResponsiveContainer> : <EmptyState message="No vehicle distribution data available." />}
-                            </ChartCard>
-                        </div>
-
-                        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-                            <h3 className="mb-4 text-base font-semibold text-gray-900">Top Customers</h3>
-                            {data.customers.top_customers?.length > 0 ? <div className="overflow-x-auto">
-                                <table className="w-full">
-                                    <thead>
-                                        <tr className="border-b">
-                                            <th className="text-left py-2 px-4">Customer</th>
-                                            <th className="text-left py-2 px-4">Bookings</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {(data.customers.top_customers || []).map((customer, index) => (
-                                            <tr key={index} className="border-b">
-                                                <td className="py-2 px-4">{customer.first_name} {customer.last_name}</td>
-                                                <td className="py-2 px-4">{customer.booking_count}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div> : <EmptyState message="No customer booking activity is available." />}
-                        </div>
-                    </div>
-                )}
-
-                {/* Staff Tab */}
-                {activeTab === 'staff' && data.staff && (
-                    <div className="space-y-6">
-                        <StatCard
-                            title="Total Staff"
-                            value={data.staff.total_staff}
-                            icon={Users}
-                            color="blue"
-                        />
-
-                        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-                            <h3 className="mb-4 text-base font-semibold text-gray-900">Staff Productivity</h3>
-                            {data.staff.staff_productivity?.length > 0 ? <div className="overflow-x-auto">
-                                <table className="w-full">
-                                    <thead>
-                                        <tr className="border-b">
-                                            <th className="text-left py-2 px-4">Staff Name</th>
-                                            <th className="text-left py-2 px-4">Completed Jobs</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {(data.staff.staff_productivity || []).map((staff, index) => (
-                                            <tr key={index} className="border-b">
-                                                <td className="py-2 px-4">{staff.name}</td>
-                                                <td className="py-2 px-4">{staff.completed_jobs}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div> : <EmptyState message="No staff productivity data is available." />}
-                        </div>
-                    </div>
-                )}
             </div>
         </AuthenticatedLayout>
     );
@@ -908,10 +1172,12 @@ function StatCard({ title, value, icon: Icon, color }) {
     );
 }
 
-function ChartCard({ title, children }) {
+function ChartCard({ title, description, children }) {
     return (
         <section className="min-w-0 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-            <h3 className="mb-4 text-base font-semibold text-gray-900">{title}</h3>
+            <h3 className="text-base font-semibold text-gray-900">{title}</h3>
+            {description && <p className="mt-1 mb-4 text-sm text-gray-500">{description}</p>}
+            {!description && <div className="mb-4" />}
             {children}
         </section>
     );

@@ -5,10 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\Booking;
 use App\Models\BookingService;
 use App\Models\JobOrder;
+use App\Models\JobOrderNote;
 use App\Models\ManualPayment;
 use App\Models\Payment;
 use App\Models\Profile;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 
 class AppointmentController extends Controller
@@ -165,6 +167,7 @@ class AppointmentController extends Controller
             'pending' => $allBookings->where('status', 'pending')->count(),
             'accepted' => $allBookings->where('status', 'accepted')->count(),
             'rejected' => $allBookings->where('status', 'rejected')->count(),
+            'cancelled' => $allBookings->where('status', 'cancelled')->count(),
             'completed' => $allBookings->where('status', 'completed')->count(),
             'assigned' => $allBookings->where('status', 'assigned')->count(),
             'ongoing' => 0,
@@ -203,7 +206,8 @@ class AppointmentController extends Controller
             ],
             'bookingSummary' => $bookingSummary,
             'staff' => $staff,
-            'bookingStatuses' => ['pending', 'accepted', 'assigned', 'rejected', 'completed'],
+            'bookingStatuses' => ['pending', 'accepted', 'assigned', 'rejected', 'completed', 'cancelled'],
+            'editableBookingStatuses' => ['pending', 'accepted', 'assigned', 'rejected', 'completed'],
             'serviceStatuses' => ['pending', 'in_progress', 'completed'],
         ]);
     }
@@ -321,7 +325,12 @@ class AppointmentController extends Controller
             ->get()
             ->groupBy('job_order_id');
 
-        $jobOrders = $jobOrders->map(function ($jobOrder) use ($productUsages) {
+        $jobOrderNotes = JobOrderNote::whereIn('job_order_id', $jobOrderIds)
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->groupBy('job_order_id');
+
+        $jobOrders = $jobOrders->map(function ($jobOrder) use ($productUsages, $jobOrderNotes) {
             $usages = $productUsages->get($jobOrder->id, collect())->map(function ($usage) {
                 return [
                     'id' => $usage->id,
@@ -337,6 +346,20 @@ class AppointmentController extends Controller
                     'created_at' => $usage->created_at?->format('Y-m-d H:i:s'),
                 ];
             });
+
+            $notes = $jobOrderNotes->get($jobOrder->id, collect())->map(function ($jobOrderNote) {
+                return [
+                    'id' => $jobOrderNote->id,
+                    'note' => $jobOrderNote->note,
+                    'photos' => collect($jobOrderNote->photos ?? [])->map(function ($path) {
+                        return [
+                            'path' => $path,
+                            'url' => Storage::disk('public')->url($path),
+                        ];
+                    })->values(),
+                    'created_at' => $jobOrderNote->created_at?->format('Y-m-d H:i:s'),
+                ];
+            })->values();
 
             return [
                 'id' => $jobOrder->id,
@@ -360,6 +383,7 @@ class AppointmentController extends Controller
                 'end_time' => $jobOrder->end_time?->format('Y-m-d H:i:s'),
                 'status' => $jobOrder->status,
                 'product_usages' => $usages,
+                'notes' => $notes,
             ];
         });
 

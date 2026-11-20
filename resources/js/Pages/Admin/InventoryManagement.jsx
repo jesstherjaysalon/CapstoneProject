@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Head } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import formatQuantityWithUnit from '@/utils/formatQuantityWithUnit';
 import { 
     Plus, Pencil, Trash2, Package, Truck, Box, Search, X, Check, 
     ArrowUpCircle, ArrowDownCircle, CheckCircle, XCircle, AlertTriangle, 
-    PlusCircle, ClipboardList, TrendingDown, Clock
+    ClipboardList, TrendingDown, Clock
 } from 'lucide-react';
 
 const TABLE_ROWS_PER_PAGE = 10;
@@ -58,8 +59,8 @@ function PaginationControls({ currentPage, totalItems, totalPages, onPageChange 
     );
 }
 
-export default function InventoryManagement({ auth }) {
-    const [activeTab, setActiveTab] = useState('categories');
+export default function InventoryManagement({ auth, module = null }) {
+    const [activeTab, setActiveTab] = useState(module === 'overview' ? 'history' : module || 'categories');
     
     // Categories State
     const [categories, setCategories] = useState([]);
@@ -91,9 +92,7 @@ export default function InventoryManagement({ auth }) {
     const [productSearch, setProductSearch] = useState('');
     const [productPage, setProductPage] = useState(1);
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
-    const [isStockModalOpen, setIsStockModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState(null);
-    const [selectedProduct, setSelectedProduct] = useState(null);
     const [productUsageHistory, setProductUsageHistory] = useState([]);
     const [usageProduct, setUsageProduct] = useState(null);
     const [isUsageModalOpen, setIsUsageModalOpen] = useState(false);
@@ -110,17 +109,11 @@ export default function InventoryManagement({ auth }) {
         inventory_category_id: '',
         name: '',
         unit: 'pcs',
-        current_stock: 0,
         reorder_level: 10,
         price: '',
         description: '',
         is_active: true,
     });
-    const [stockFormData, setStockFormData] = useState({
-        quantity: '',
-        remarks: '',
-    });
-
     // Stock Transactions State
     const [transactions, setTransactions] = useState([]);
     const [transactionSearch, setTransactionSearch] = useState('');
@@ -410,31 +403,6 @@ export default function InventoryManagement({ auth }) {
         }
     };
 
-    const handleStockSubmit = async (e) => {
-        e.preventDefault();
-        try {
-            const response = await fetch(`/admin/products/${selectedProduct.id}/add-stock`, {
-                method: 'POST',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
-                },
-                body: JSON.stringify(stockFormData),
-            });
-
-            if (response.ok) {
-                await fetchProducts();
-                await fetchTransactions();
-                setIsStockModalOpen(false);
-                setSelectedProduct(null);
-                setStockFormData({ quantity: '', remarks: '' });
-            }
-        } catch (error) {
-            console.error('Error adding stock:', error);
-        }
-    };
-
     const handleProductDelete = async (product) => {
         if (!confirm(`Are you sure you want to delete "${product.name}"?`)) return;
 
@@ -464,7 +432,6 @@ export default function InventoryManagement({ auth }) {
             inventory_category_id: '',
             name: '',
             unit: 'pcs',
-            current_stock: 0,
             reorder_level: 10,
             price: '',
             description: '',
@@ -559,7 +526,8 @@ export default function InventoryManagement({ auth }) {
         const searchLower = transactionSearch.toLowerCase();
         const productName = transaction.product?.name?.toLowerCase() || '';
         const remarks = transaction.remarks?.toLowerCase() || '';
-        return productName.includes(searchLower) || remarks.includes(searchLower);
+        const referenceNumber = transaction.reference_number?.toLowerCase() || '';
+        return productName.includes(searchLower) || remarks.includes(searchLower) || referenceNumber.includes(searchLower);
     }) : [];
 
     const filteredRequests = Array.isArray(requests) ? requests.filter(request => {
@@ -615,25 +583,40 @@ export default function InventoryManagement({ auth }) {
         setInventoryHistoryPage(1);
     }, [activeTab]);
 
+    useEffect(() => {
+        if (module) setActiveTab(module === 'overview' ? 'history' : module);
+    }, [module]);
+
+    const pageTitle = module
+        ? { overview: 'Inventory Overview', categories: 'Inventory Categories', suppliers: 'Suppliers', products: 'Products' }[module] || 'Inventory Management'
+        : 'Inventory Management';
+    const visibleTabs = module === 'overview'
+        ? tabs.filter((tab) => !['categories', 'suppliers', 'products'].includes(tab.id))
+        : tabs;
+
     return (
-        <AuthenticatedLayout user={auth.user} header={<h2 className="font-semibold text-xl text-gray-800 leading-tight">Inventory Management</h2>}>
-            <Head title="Inventory Management" />
+        <AuthenticatedLayout user={auth.user} header={<h2 className="font-semibold text-xl text-gray-800 leading-tight">{pageTitle}</h2>}>
+            <Head title={pageTitle} />
 
             <div className="space-y-6 py-6 px-4">
                 {/* Page Title Container */}
                 <div className="rounded-2xl border border-slate-200 bg-white p-6" style={{ boxShadow: '0 4px 20px rgba(30, 58, 138, 0.15)' }}>
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                         <div>
-                            <h1 className="text-2xl font-bold text-slate-900">Inventory Management</h1>
+                            <h1 className="text-2xl font-bold text-slate-900">{pageTitle}</h1>
                             <p className="mt-1 text-sm text-slate-600">
-                                Manage inventory categories, suppliers, products, stock transactions, and product requests.
+                                {module === 'categories' && 'Organize inventory products and category-level settings.'}
+                                {module === 'suppliers' && 'Manage supplier details used by products and receiving.'}
+                                {module === 'products' && 'Manage product details and monitor available inventory stock.'}
+                                {module === 'overview' && 'Review inventory history, stock movements, and product requests.'}
+                                {!module && 'Manage inventory categories, suppliers, products, stock transactions, and product requests.'}
                             </p>
                         </div>
                     </div>
                 </div>
 
                 {/* Summary Cards */}
-                <div className="grid gap-4 md:grid-cols-4">
+                {(!module || module === 'overview') && <div className="grid gap-4 md:grid-cols-4">
                     <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5 hover:shadow-md transition-shadow">
                         <div className="flex items-start justify-between">
                             <div>
@@ -678,14 +661,14 @@ export default function InventoryManagement({ auth }) {
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>}
 
                 {/* Main Content Container */}
                 <div className="rounded-2xl border border-slate-200 bg-white p-6" style={{ boxShadow: '0 4px 20px rgba(30, 58, 138, 0.15)' }}>
                     {/* Tabs */}
-                    <div className="border-b border-slate-200">
+                    {(!module || module === 'overview') && <div className="border-b border-slate-200">
                         <nav className="flex -mb-px gap-1">
-                            {tabs.map((tab) => {
+                            {visibleTabs.map((tab) => {
                                 const Icon = tab.icon;
                                 return (
                                     <button
@@ -714,7 +697,7 @@ export default function InventoryManagement({ auth }) {
                                 );
                             })}
                         </nav>
-                    </div>
+                    </div>}
 
                     <div className="mt-6">
                         {/* Categories Tab */}
@@ -1025,7 +1008,7 @@ export default function InventoryManagement({ auth }) {
                                                             <td className="px-6 py-4">
                                                                 <div className="flex items-center gap-2">
                                                                     <span className={product.current_stock <= product.reorder_level ? 'text-rose-600 font-semibold' : 'text-slate-900'}>
-                                                                        {product.current_stock} {product.unit}
+                                                                        {formatQuantityWithUnit(product.current_stock, product.unit)}
                                                                     </span>
                                                                     {product.current_stock <= product.reorder_level && (
                                                                         <AlertTriangle className="w-4 h-4 text-rose-600" title="Low stock" />
@@ -1051,17 +1034,13 @@ export default function InventoryManagement({ auth }) {
                                                                 >
                                                                     Usage
                                                                 </button>
-                                                                <button
-                                                                    onClick={() => {
-                                                                        setSelectedProduct(product);
-                                                                        setStockFormData({ quantity: '', remarks: '' });
-                                                                        setIsStockModalOpen(true);
-                                                                    }}
+                                                                <a
+                                                                    href={`/admin/inventory/receiving?product_id=${product.id}`}
                                                                     className="inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-200 transition mr-2"
-                                                                    title="Add Stock"
+                                                                    title="Receive stock"
                                                                 >
-                                                                    <PlusCircle size={12} /> Add Stock
-                                                                </button>
+                                                                    Receive
+                                                                </a>
                                                                 <button
                                                                     onClick={() => {
                                                                         setEditingProduct(product);
@@ -1070,7 +1049,6 @@ export default function InventoryManagement({ auth }) {
                                                                             inventory_category_id: product.inventory_category_id,
                                                                             name: product.name,
                                                                             unit: product.unit,
-                                                                            current_stock: product.current_stock,
                                                                             reorder_level: product.reorder_level,
                                                                             price: product.price || '',
                                                                             description: product.description || '',
@@ -1325,6 +1303,8 @@ export default function InventoryManagement({ auth }) {
                                                         <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Product</th>
                                                         <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Type</th>
                                                         <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Quantity</th>
+                                                        <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Reference</th>
+                                                        <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Status</th>
                                                         <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Remarks</th>
                                                     </tr>
                                                 </thead>
@@ -1349,6 +1329,12 @@ export default function InventoryManagement({ auth }) {
                                                             <td className="px-6 py-4 text-sm font-semibold">
                                                                 <span className={transaction.transaction_type === 'IN' ? 'text-emerald-600' : 'text-rose-600'}>
                                                                     {transaction.transaction_type === 'IN' ? '+' : '-'}{transaction.quantity}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-sm text-slate-700">{transaction.reference_number || '-'}</td>
+                                                            <td className="px-6 py-4">
+                                                                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold capitalize ${transaction.status === 'confirmed' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                                                                    {transaction.status || 'confirmed'}
                                                                 </span>
                                                             </td>
                                                             <td className="px-6 py-4 text-sm text-slate-700">{transaction.remarks || '-'}</td>
@@ -1449,7 +1435,7 @@ export default function InventoryManagement({ auth }) {
                                                                 <td className="px-6 py-4 text-sm font-semibold text-slate-900">#{request.job_order_id}</td>
                                                                 <td className="px-6 py-4 text-sm font-semibold text-slate-900">{request.product?.name || '-'}</td>
                                                                 <td className="px-6 py-4 text-sm text-slate-700">{request.product?.inventory_category?.name || '-'}</td>
-                                                                <td className="px-6 py-4 text-sm font-semibold text-slate-900">{request.quantity_used} {request.product?.unit || 'pcs'}</td>
+                                                                <td className="px-6 py-4 text-sm font-semibold text-slate-900">{formatQuantityWithUnit(request.quantity_used, request.product?.unit || 'pcs')}</td>
                                                                 <td className="px-6 py-4">
                                                                     <div className="flex items-center gap-2">
                                                                         <span className={insufficientStock ? 'text-rose-600 font-semibold' : 'text-slate-900'}>
@@ -1623,6 +1609,7 @@ export default function InventoryManagement({ auth }) {
                             </button>
                         </div>
                         <form onSubmit={handleProductSubmit} className="space-y-4 p-6">
+                            <p className="text-sm text-slate-500">Available stock starts at zero and is updated through confirmed receiving transactions.</p>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="col-span-2">
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
@@ -1683,16 +1670,6 @@ export default function InventoryManagement({ auth }) {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Current Stock</label>
-                                    <input
-                                        type="number"
-                                        value={productFormData.current_stock}
-                                        onChange={(e) => setProductFormData({ ...productFormData, current_stock: parseInt(e.target.value) || 0 })}
-                                        className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none"
-                                        required
-                                    />
-                                </div>
-                                <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Reorder Level</label>
                                     <input
                                         type="number"
@@ -1719,53 +1696,6 @@ export default function InventoryManagement({ auth }) {
                             <div className="flex justify-end gap-3 pt-4">
                                 <button type="button" onClick={() => setIsProductModalOpen(false)} className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200 transition">Cancel</button>
                                 <button type="submit" className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition">{editingProduct ? 'Update' : 'Create'}</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Stock Modal */}
-            {isStockModalOpen && selectedProduct && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-                    <div className="rounded-3xl bg-white shadow-2xl max-w-md w-full">
-                        <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4 rounded-t-3xl">
-                            <h2 className="text-xl font-semibold text-slate-900">Add Stock</h2>
-                            <button
-                                onClick={() => setIsStockModalOpen(false)}
-                                className="rounded-full p-2 text-slate-500 hover:bg-slate-200 transition"
-                            >
-                                <X size={24} />
-                            </button>
-                        </div>
-                        <form onSubmit={handleStockSubmit} className="space-y-4 p-6">
-                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                                <p className="text-sm text-slate-600">Product: <span className="font-semibold text-slate-900">{selectedProduct.name}</span></p>
-                                <p className="text-sm text-slate-600">Current Stock: <span className="font-semibold text-slate-900">{selectedProduct.current_stock} {selectedProduct.unit}</span></p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Quantity</label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    value={stockFormData.quantity}
-                                    onChange={(e) => setStockFormData({ ...stockFormData, quantity: e.target.value })}
-                                    className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none"
-                                    required
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Remarks</label>
-                                <textarea
-                                    value={stockFormData.remarks}
-                                    onChange={(e) => setStockFormData({ ...stockFormData, remarks: e.target.value })}
-                                    className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none"
-                                    rows="3"
-                                />
-                            </div>
-                            <div className="flex justify-end gap-3 pt-4">
-                                <button type="button" onClick={() => setIsStockModalOpen(false)} className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200 transition">Cancel</button>
-                                <button type="submit" className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition">Add Stock</button>
                             </div>
                         </form>
                     </div>

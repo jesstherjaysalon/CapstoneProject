@@ -14,12 +14,13 @@ const statusClasses = {
     accepted: 'bg-sky-100 text-sky-800',
     assigned: 'bg-purple-100 text-purple-800',
     rejected: 'bg-rose-100 text-rose-800',
+    cancelled: 'bg-slate-200 text-slate-700',
     completed: 'bg-emerald-100 text-emerald-800',
     ongoing: 'bg-indigo-100 text-indigo-800',
     in_progress: 'bg-sky-100 text-sky-800',
 };
 
-export default function Appointments({ auth, bookings, pagination, bookingSummary, bookingStatuses, staff }) {
+export default function Appointments({ auth, bookings, pagination, bookingSummary, bookingStatuses, editableBookingStatuses, staff }) {
     const { flash = {} } = usePage().props;
     const [search, setSearch] = useState('');
     const [bookingStatusFilter, setBookingStatusFilter] = useState('');
@@ -697,19 +698,25 @@ export default function Appointments({ auth, bookings, pagination, bookingSummar
                                         </div>
                                     </div>
 
-                                    <form onSubmit={(event) => { handleBookingStatusChange(event, selectedBooking.id); closeModal(); }} className="mt-4">
-                                        <label className="block text-sm font-medium text-slate-700 mb-2">Update booking status</label>
-                                        <div className="flex gap-3">
-                                            <select name="status" defaultValue={selectedBooking.status} className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none">
-                                                {bookingStatuses.map((status) => (
-                                                    <option key={status} value={status}>{status}</option>
-                                                ))}
-                                            </select>
-                                            <button type="submit" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition">
-                                                Update
-                                            </button>
-                                        </div>
-                                    </form>
+                                    {selectedBooking.status === 'cancelled' ? (
+                                        <p className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600">
+                                            Cancelled by the customer. Refunds are handled at the office.
+                                        </p>
+                                    ) : (
+                                        <form onSubmit={(event) => { handleBookingStatusChange(event, selectedBooking.id); closeModal(); }} className="mt-4">
+                                            <label className="block text-sm font-medium text-slate-700 mb-2">Update booking status</label>
+                                            <div className="flex gap-3">
+                                                <select name="status" defaultValue={selectedBooking.status} className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none">
+                                                    {editableBookingStatuses.map((status) => (
+                                                        <option key={status} value={status}>{status}</option>
+                                                    ))}
+                                                </select>
+                                                <button type="submit" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition">
+                                                    Update
+                                                </button>
+                                            </div>
+                                        </form>
+                                    )}
                                 </div>
 
                                 {/* Services */}

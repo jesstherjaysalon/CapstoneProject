@@ -6,6 +6,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Models\Booking;
+use App\Models\BookingService;
 use App\Models\ManualPayment;
 use App\Models\Payment;
 use App\Models\JobOrder;
@@ -71,11 +72,14 @@ class ReportsController extends Controller
                 return ((float) ($usage->product->price ?? 0)) * (int) $usage->quantity_used;
             });
 
-        $totalPaid = (float) $booking->payments()->where('status', 'paid')->sum('amount')
+        $actualPaid = (float) $booking->payments()->where('status', 'paid')->sum('amount')
             + (float) $booking->manualPayments()->sum('amount');
+        $totalPaid = $booking->status === 'cancelled'
+            ? (float) ($booking->cancellation_fee ?? min($actualPaid, 50))
+            : $actualPaid;
 
         $totalCost = $serviceCost + $productCost;
-        $balance = $totalCost - $totalPaid;
+        $balance = $booking->status === 'cancelled' ? 0 : $totalCost - $totalPaid;
 
         return [
             'service_cost' => $serviceCost,
@@ -83,7 +87,7 @@ class ReportsController extends Controller
             'total_cost' => $totalCost,
             'total_paid' => $totalPaid,
             'balance' => $balance,
-            'is_paid' => $balance <= 0,
+            'is_paid' => $booking->status === 'cancelled' || $balance <= 0,
             'customer_name' => trim(sprintf('%s %s',
                 $booking->profile?->first_name ?? '',
                 $booking->profile?->last_name ?? ''
@@ -93,7 +97,7 @@ class ReportsController extends Controller
         ];
     }
 
-    private function getPaidBookingRevenueSummary(Booking $booking): array
+    private function getBookingRevenueSummary(Booking $booking): array
     {
         $serviceRevenue = (float) $booking->services->sum(function ($service) {
             $servicePrice = (float) ($service->service?->price ?? 0);
@@ -117,17 +121,25 @@ class ReportsController extends Controller
         $paidAmount = (float) $booking->payments()->where('status', 'paid')->sum('amount')
             + (float) $booking->manualPayments()->sum('amount');
 
-        $actualPaidServiceRevenue = $paidAmount > 0 ? min($serviceRevenue, $paidAmount) : 0;
-        $actualPaidProductRevenue = $paidAmount > 0 ? max(0, $paidAmount - $actualPaidServiceRevenue) : 0;
+        if ($booking->status === 'cancelled') {
+            $cancellationFee = (float) ($booking->cancellation_fee ?? min($paidAmount, 50));
 
-        if ($productRevenue > 0 && $actualPaidProductRevenue > 0) {
-            $actualPaidProductRevenue = min($productRevenue, $actualPaidProductRevenue);
+            return [
+                'service_revenue' => 0,
+                'product_revenue' => 0,
+                'cancellation_fee_revenue' => $cancellationFee,
+                'total_revenue' => $cancellationFee,
+                'balance' => 0,
+            ];
         }
+
+        $actualPaidServiceRevenue = $paidAmount > 0 ? min($serviceRevenue, $paidAmount) : 0;
 
         return [
             'service_revenue' => $actualPaidServiceRevenue,
-            'product_revenue' => $actualPaidProductRevenue,
-            'total_paid_revenue' => $actualPaidServiceRevenue + $actualPaidProductRevenue,
+            'product_revenue' => $productRevenue,
+            'cancellation_fee_revenue' => 0,
+            'total_revenue' => $actualPaidServiceRevenue + $productRevenue,
             'balance' => max(0, $serviceRevenue + $productRevenue - $paidAmount),
         ];
     }
@@ -140,12 +152,19 @@ class ReportsController extends Controller
     // Dashboard Overview
     public function overview()
     {
-        $onlinePayments = Payment::where('status', 'paid')->sum('amount');
-        $manualPayments = ManualPayment::sum('amount');
+        $cancelledBookingIds = Booking::where('status', 'cancelled')->pluck('id');
+        $onlinePayments = Payment::where('status', 'paid')
+            ->whereNotIn('booking_id', $cancelledBookingIds)
+            ->sum('amount');
+        $manualPayments = ManualPayment::whereNotIn('booking_id', $cancelledBookingIds)->sum('amount');
+        $cancellationFees = (float) Booking::where('status', 'cancelled')->sum('cancellation_fee');
+        $cancelledBookingServiceIds = BookingService::whereIn('booking_id', $cancelledBookingIds)->pluck('id');
+        $cancelledJobOrderIds = JobOrder::whereIn('booking_service_id', $cancelledBookingServiceIds)->pluck('id');
 
         // Calculate product sales from approved service product usage
         $productSales = ServiceProductUsage::with('product')
             ->where('status', 'Approved')
+            ->whereNotIn('job_order_id', $cancelledJobOrderIds)
             ->whereHas('product', function ($query) {
                 $query->whereNotNull('price')->where('price', '>', 0);
             })
@@ -154,17 +173,78 @@ class ReportsController extends Controller
                 return ($usage->product->price ?? 0) * $usage->quantity_used;
             });
 
-        $totalRevenue = $onlinePayments + $manualPayments + $productSales;
+        $totalRevenue = $onlinePayments + $manualPayments + $productSales + $cancellationFees;
+        $today = Carbon::today();
+        $trendStart = $today->copy()->subDays(6);
+        $dailyBookingCounts = Booking::query()
+            ->select('date', DB::raw('COUNT(*) as total'))
+            ->whereBetween('date', [$trendStart->toDateString(), $today->toDateString()])
+            ->where('status', '!=', 'cancelled')
+            ->groupBy('date')
+            ->pluck('total', 'date');
+        $bookingTrend = collect(range(0, 6))->map(function ($dayOffset) use ($trendStart, $dailyBookingCounts) {
+            $date = $trendStart->copy()->addDays($dayOffset);
+            $dateKey = $date->toDateString();
+
+            return [
+                'date' => $dateKey,
+                'bookings' => (int) ($dailyBookingCounts[$dateKey] ?? 0),
+            ];
+        });
+        $bookingStatusDistribution = Booking::query()
+            ->select('status', DB::raw('COUNT(*) as total'))
+            ->groupBy('status')
+            ->orderBy('status')
+            ->get()
+            ->map(fn ($booking) => [
+                'status' => $booking->status,
+                'total' => (int) $booking->total,
+            ]);
+        $recentBookings = Booking::with(['profile', 'services.service'])
+            ->orderByDesc('created_at')
+            ->limit(6)
+            ->get()
+            ->map(fn ($booking) => [
+                'id' => $booking->id,
+                'customer_name' => trim(sprintf(
+                    '%s %s',
+                    $booking->profile?->first_name ?? '',
+                    $booking->profile?->last_name ?? ''
+                )) ?: 'Guest Customer',
+                'date' => $booking->date?->format('Y-m-d'),
+                'services' => $booking->services
+                    ->map(fn ($bookingService) => $bookingService->service?->name)
+                    ->filter()
+                    ->implode(', ') ?: 'No service listed',
+                'status' => $booking->status,
+            ]);
+        $topServices = BookingService::query()
+            ->select('service_id', DB::raw('COUNT(*) as total_bookings'))
+            ->with('service:id,name')
+            ->whereHas('booking', fn ($query) => $query->where('status', '!=', 'cancelled'))
+            ->groupBy('service_id')
+            ->orderByDesc('total_bookings')
+            ->limit(5)
+            ->get()
+            ->map(fn ($bookingService) => [
+                'name' => $bookingService->service?->name ?? 'Unknown service',
+                'bookings' => (int) $bookingService->total_bookings,
+            ]);
 
         return response()->json([
-            'total_bookings' => Booking::count(),
+            'total_bookings' => Booking::where('status', '!=', 'cancelled')->count(),
             'pending_bookings' => Booking::where('status', 'pending')->count(),
             'completed_bookings' => Booking::where('status', 'completed')->count(),
             'total_revenue' => $totalRevenue,
+            'total_cancellation_fees' => $cancellationFees,
             'total_customers' => User::where('role', 'Customer')->count(),
             'total_staff' => User::where('role', 'Staff')->count(),
             'low_stock_products' => Product::where('current_stock', '<=', DB::raw('reorder_level'))->count(),
             'active_job_orders' => JobOrder::where('status', 'in_progress')->count(),
+            'booking_trend' => $bookingTrend,
+            'booking_status_distribution' => $bookingStatusDistribution,
+            'recent_bookings' => $recentBookings,
+            'top_services' => $topServices,
         ]);
     }
 
@@ -183,10 +263,10 @@ class ReportsController extends Controller
             return $this->getBookingFinancialSummary($booking);
         });
 
-        $paidBookings = $bookingSummaries->filter(fn ($summary) => $summary['is_paid'] && $summary['total_paid'] > 0)->values();
-        $paidRevenueSummaries = $bookings->map(function (Booking $booking) {
-            return $this->getPaidBookingRevenueSummary($booking);
-        })->filter(fn ($summary) => $summary['total_paid_revenue'] > 0);
+        $revenueBookingIds = $bookings->where('status', '!=', 'cancelled')->pluck('id')->all();
+        $revenueSummaries = $bookings->map(function (Booking $booking) {
+            return $this->getBookingRevenueSummary($booking);
+        })->filter(fn ($summary) => $summary['total_revenue'] > 0);
 
         $unpaidCustomers = $bookingSummaries->filter(fn ($summary) => !$summary['is_paid'] && $summary['total_cost'] > 0)
             ->sortByDesc('balance')
@@ -202,22 +282,18 @@ class ReportsController extends Controller
 
         $totalUnpaidBalance = (float) $unpaidCustomers->sum('balance');
 
-        $revenueByPaymentMethod = $paidBookings->flatMap(function ($summary) {
-            return [];
-        })->values();
-
         $revenueByPaymentMethod = Payment::where('status', 'paid')
             ->when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'created_at', $startDate, $endDate))
-            ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
+            ->whereIn('booking_id', $revenueBookingIds)
             ->selectRaw('payment_method, SUM(amount) as total, COUNT(*) as count')
             ->groupBy('payment_method')
             ->get();
 
         $manualPaymentTotal = ManualPayment::when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'created_at', $startDate, $endDate))
-            ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
+            ->whereIn('booking_id', $revenueBookingIds)
             ->sum('amount');
         $manualPaymentCount = ManualPayment::when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'created_at', $startDate, $endDate))
-            ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
+            ->whereIn('booking_id', $revenueBookingIds)
             ->count();
 
         if ($manualPaymentTotal > 0) {
@@ -228,15 +304,27 @@ class ReportsController extends Controller
             ]);
         }
 
+        $cancellationFeeBookings = $bookings->where('status', 'cancelled')
+            ->filter(fn (Booking $booking) => (float) ($booking->cancellation_fee ?? 0) > 0);
+        $cancellationFeeTotal = (float) $cancellationFeeBookings->sum('cancellation_fee');
+
+        if ($cancellationFeeTotal > 0) {
+            $revenueByPaymentMethod->push((object) [
+                'payment_method' => 'cancellation fee',
+                'total' => $cancellationFeeTotal,
+                'count' => $cancellationFeeBookings->count(),
+            ]);
+        }
+
         $revenueByAmountType = Payment::where('status', 'paid')
             ->when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'created_at', $startDate, $endDate))
-            ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
+            ->whereIn('booking_id', $revenueBookingIds)
             ->selectRaw('amount_type, SUM(amount) as total, COUNT(*) as count')
             ->groupBy('amount_type')
             ->get();
 
         $paymentStatus = Payment::selectRaw('status, COUNT(*) as count, SUM(amount) as total')
-            ->whereIn('booking_id', $paidBookings->pluck('booking_id')->all())
+            ->whereIn('booking_id', $revenueBookingIds)
             ->when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'created_at', $startDate, $endDate))
             ->groupBy('status')
             ->get();
@@ -247,25 +335,28 @@ class ReportsController extends Controller
             'total' => $manualPaymentTotal,
         ]);
 
-        $dailyRevenue = $paidRevenueSummaries
+        $dailyRevenue = $revenueSummaries
             ->groupBy(fn ($summary, $index) => $bookings->get($index)?->date?->format('Y-m-d'))
             ->map(function ($summaryGroup, $date) {
                 $serviceTotal = (float) $summaryGroup->sum('service_revenue');
                 $productTotal = (float) $summaryGroup->sum('product_revenue');
+                $cancellationFeeTotal = (float) $summaryGroup->sum('cancellation_fee_revenue');
 
                 return (object) [
                     'date' => $date,
                     'service_total' => $serviceTotal,
                     'product_total' => $productTotal,
-                    'total' => $serviceTotal + $productTotal,
+                    'cancellation_fee_total' => $cancellationFeeTotal,
+                    'total' => $serviceTotal + $productTotal + $cancellationFeeTotal,
                 ];
             })
             ->sortBy('date')
             ->values();
 
-        $totalProductSales = (float) $paidRevenueSummaries->sum('product_revenue');
-        $totalRevenueByService = (float) $paidRevenueSummaries->sum('service_revenue');
-        $totalDailyRevenue = $totalProductSales + $totalRevenueByService;
+        $totalProductSales = (float) $revenueSummaries->sum('product_revenue');
+        $totalRevenueByService = (float) $revenueSummaries->sum('service_revenue');
+        $totalCancellationFees = (float) $revenueSummaries->sum('cancellation_fee_revenue');
+        $totalDailyRevenue = $totalProductSales + $totalRevenueByService + $totalCancellationFees;
 
         $response = [
             'revenue_by_payment_method' => $revenueByPaymentMethod,
@@ -275,6 +366,7 @@ class ReportsController extends Controller
             'total_daily_revenue' => $totalDailyRevenue,
             'total_product_sales' => $totalProductSales,
             'total_revenue_by_service' => $totalRevenueByService,
+            'total_cancellation_fees' => $totalCancellationFees,
             'total_unpaid_balance' => $totalUnpaidBalance,
             'unpaid_customers' => $unpaidCustomers,
         ];
@@ -288,6 +380,7 @@ class ReportsController extends Controller
 
         $paidBookingIds = Booking::with(['services.service', 'payments', 'manualPayments'])
             ->where('status', '!=', 'rejected')
+            ->where('status', '!=', 'cancelled')
             ->when($startDate, fn ($query) => $query->whereDate('date', '>=', $startDate))
             ->when($endDate, fn ($query) => $query->whereDate('date', '<=', $endDate))
             ->get()
@@ -317,41 +410,32 @@ class ReportsController extends Controller
     {
         [$startDate, $endDate] = $this->validatedDateRange($request);
 
-        $paidBookingIds = Booking::with(['services.service', 'payments', 'manualPayments'])
-            ->where('status', '!=', 'rejected')
-            ->when($startDate, fn ($query) => $query->whereDate('date', '>=', $startDate))
-            ->when($endDate, fn ($query) => $query->whereDate('date', '<=', $endDate))
-            ->get()
-            ->filter(function (Booking $booking) {
-                $summary = $this->getBookingFinancialSummary($booking);
-                return $summary['is_paid'] && $summary['total_paid'] > 0;
-            })
-            ->pluck('id')
-            ->all();
-
         $productSales = DB::table('service_product_usage as spu')
             ->join('products as p', 'spu.product_id', '=', 'p.id')
             ->join('job_orders as jo', 'spu.job_order_id', '=', 'jo.id')
             ->join('booking_services as bs', 'jo.booking_service_id', '=', 'bs.id')
             ->join('bookings as b', 'bs.booking_id', '=', 'b.id')
-            ->join('profiles as customer_profile', 'b.profile_id', '=', 'customer_profile.id')
-            ->join('users as customer_user', 'customer_profile.user_id', '=', 'customer_user.id')
+            ->leftJoin('profiles as customer_profile', 'b.profile_id', '=', 'customer_profile.id')
+            ->leftJoin('users as customer_user', 'customer_profile.user_id', '=', 'customer_user.id')
             ->leftJoin('services as s', 'bs.service_id', '=', 's.id')
             ->where('spu.status', 'Approved')
-            ->whereIn('b.id', $paidBookingIds)
-            ->when($startDate || $endDate, fn ($query) => $this->applyTimestampRange($query, 'spu.created_at', $startDate, $endDate))
+            ->whereNotIn('b.status', ['rejected', 'cancelled'])
+            ->whereNotNull('p.price')
+            ->where('p.price', '>', 0)
+            ->when($startDate, fn ($query) => $query->whereDate('b.date', '>=', $startDate))
+            ->when($endDate, fn ($query) => $query->whereDate('b.date', '<=', $endDate))
             ->select([
                 'spu.id as usage_id',
                 'p.id as product_id',
                 'p.name as product_name',
                 'p.name',
-                'customer_user.name as customer_name',
                 'jo.profile_id as staff_ids',
                 's.name as service_name',
                 'b.id as booking_id',
                 'b.date as booking_date',
                 'spu.quantity_used',
                 'p.price',
+                DB::raw("COALESCE(customer_user.name, 'Guest Customer') as customer_name"),
                 DB::raw('(spu.quantity_used * p.price) as total_sales'),
             ])
             ->orderByDesc('total_sales')
@@ -551,16 +635,49 @@ class ReportsController extends Controller
             'bookingService.booking.vehicle',
         ])
             ->latest()
+            ->get();
+
+        $jobOrderProducts = ServiceProductUsage::with([
+            'product' => fn ($query) => $query->withTrashed(),
+        ])
+            ->whereIn('job_order_id', $jobOrderHistory->pluck('id'))
+            ->where('status', 'Approved')
             ->get()
-            ->map(function (JobOrder $jobOrder) {
+            ->groupBy('job_order_id');
+
+        $jobOrderHistory = $jobOrderHistory->map(function (JobOrder $jobOrder) use ($jobOrderProducts) {
                 $booking = $jobOrder->bookingService?->booking;
                 $vehicle = $booking?->vehicle;
                 $customer = $booking?->profile;
                 $staffNames = $jobOrder->staff_names ?? 'Unassigned';
+                $isCancelled = in_array($booking?->status, ['rejected', 'cancelled'], true);
+                $products = $jobOrderProducts->get($jobOrder->id, collect())
+                    ->filter(fn ($usage) => $usage->product && (float) $usage->product->price > 0)
+                    ->map(function ($usage) {
+                        $unitPrice = (float) $usage->product->price;
+                        $quantity = (int) $usage->quantity_used;
+
+                        return [
+                            'name' => $usage->product->name,
+                            'quantity' => $quantity,
+                            'unit' => $usage->product->unit,
+                            'unit_price' => $unitPrice,
+                            'total_sales' => $unitPrice * $quantity,
+                        ];
+                    })
+                    ->values();
+                $serviceSales = !$isCancelled
+                    ? (float) ($jobOrder->bookingService?->service?->price ?? 0)
+                    : 0;
+                $productSales = !$isCancelled
+                    ? (float) $products->sum('total_sales')
+                    : 0;
 
                 return [
                     'id' => $jobOrder->id,
                     'booking_id' => $booking?->id,
+                    'booking_status' => $booking?->status,
+                    'customer_id' => $customer?->id,
                     'service_name' => $jobOrder->bookingService?->service?->name,
                     'customer_name' => $customer
                         ? trim(($customer->first_name ?? '').' '.($customer->last_name ?? ''))
@@ -575,6 +692,11 @@ class ReportsController extends Controller
                     'start_time' => $jobOrder->start_time?->toISOString(),
                     'end_time' => $jobOrder->end_time?->toISOString(),
                     'status' => $jobOrder->status,
+                    'products' => $products,
+                    'sales_excluded' => $isCancelled,
+                    'service_sales' => $serviceSales,
+                    'product_sales' => $productSales,
+                    'total_sales' => $serviceSales + $productSales,
                 ];
             })
             ->values();
@@ -598,6 +720,7 @@ class ReportsController extends Controller
             ->get();
 
         $stockTransactions = StockTransaction::with('product')
+            ->confirmed()
             ->orderBy('transaction_date', 'desc')
             ->limit(50)
             ->get();
